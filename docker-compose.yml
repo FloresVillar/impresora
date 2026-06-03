@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  myDB19_test:
+    image: postgres:15
+    container_name: odoo19-db-test
+    restart: always
+    ports:
+      - "5434:5432"  # Usamos el puerto 5434 para que no choque si el otro proyecto está prendido
+    environment:
+      POSTGRES_USER: chrizzzadmin
+      POSTGRES_PASSWORD: "051002"
+      POSTGRES_DB: postgres
+    volumes:
+      - ./postgres19_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U chrizzzadmin -d postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  odoo_test:
+    image: odoo:19.0
+    container_name: odoo19-server-test  # Nombre único para tus pruebas de impresora
+    restart: always
+    depends_on:
+      myDB19_test:
+        condition: service_healthy
+    environment:
+      - HOST=myDB19_test
+      - PORT=5432
+      - USER=chrizzzadmin
+      - PASSWORD=051002
+    ports:
+      - "8071:8069"  # Puerto 8071 para entrar desde el navegador (http://localhost:8071)
+    volumes:
+      - ./addons_custom:/mnt/extra-addons  # Aquí meterás el módulo base_report_to_printer
+      - ./config/odoo.conf:/etc/odoo/odoo.conf:ro
+      - ./odoo_test_data:/var/lib/odoo
