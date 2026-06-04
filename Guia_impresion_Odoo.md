@@ -16,19 +16,23 @@ El objetivo es que al imprimir desde Odoo (p. ej. una insignia de empleado), el 
 |-----------|-------------|
 | WSL2 con Ubuntu 22.04+ | `wsl --list --verbose` |
 | Docker Desktop corriendo | `docker ps` |
-| Contenedor Odoo activo | `docker ps --filter name=` |
-| Módulo `base_report_to_printer` copiado en `addons_custom` | addons_custom/base_report_to_printer` |
+
 
 ---
 ## Clonar configurar las variables de entorno
 Copia la plantilla de ejemplo y edítala con tus datos:
 
 ```bash   
-cp .env.impresora.example .env.impresora
+cp .env.impresora.example .env
 
-nano .env.impresora
+nano .env
+```
+Es sumamente importante que se editen los nombres de las base de datos y contenedores ; asi como las rutas de las carpetas.
 
-echo ".env.impresora" >> .gitignore
+Debido a que se usa .env.impresora en lugar de solo .env si se quiere ejecutar docker compose down, la alternativa es **docker compose --env-file .env.impresora down(otros comandos)** si se requiere corregir.Pero se resuelve usar .env pues esto es estandar
+
+```bash
+echo ".env" >> .gitignore
    ```
 ---
 ## Paso -2 - levanta servicio de impresion de linux
@@ -38,10 +42,11 @@ make cups-start
 ```
 ---
 ## Paso -1 - levantar los contenedores
+Este target tiene un prerrequisito fix-env , el cual sanitiza .env.impresora , elimininando ^M formatos windows,haciendo que el archivo sea nativo de unix
 ```bash
 make up
 ```
-Seguidamente en localhost:8071 usar las variables de entorno de odoo.conf : admin_pass = Master Password  , y como base de datos  ODOO_DB=NOMBRE_BD
+Seguidamente en localhost:ODOO_PORT usar las variables de entorno de odoo.conf : admin_pass = Master Password  , y como base de datos  ODOO_DB=NOMBRE_BD
 
 ## Paso 0 - Instalar modulo de la OCA
 > **Por qué:**  El modulo no viene de forma nativa en Odoo, la OCA (ODOO community Association) agrupa los modulos relacionados con impresion , envios y reportes en ese repositorio
@@ -234,12 +239,18 @@ Como Odoo 19 eliminó la palabra tree de todo su ecosistema de tipos de vista, e
 ```bash
 make odoo-fix-actions
 ```
+## Dependencias faltantes
+Para evitar ModuleBotFoundError , se necesita pycups
+```bash
+make odoo-force-deps
+```
 ---
 ## Paso 6 — Instalar el módulo en Odoo
 
 ```bash
 make odoo-update
 ```
+Luego ir a localhost:ODOO_PORT en el navegador que usted utilice.
 
 Lo que hace internamente:
 ```bash
@@ -285,35 +296,57 @@ docker exec odoo19-server-dev odoo -d odoo_aje -u base_report_to_printer --stop-
 
 | Campo | Valor |
 |-------|-------|
-| Nombre | PDF_FILTRADO |
+| CAMPO SIN ETIQUETA (display name) | PDF_FILTRADO |
+| System Name (sudo lpadmin -p PDF_FILTRADO en el taget cups-printer)| PDF_FILTRADO |
 | Servidor | CUPS Local (el del paso anterior) |
 | Nombre en CUPS | `PDF_FILTRADO` |
 
+Luego es necesario Actualizar los printers
+
 ### 7e — Configurar impresora predeterminada por usuario *(opcional)*
 `Ajustes → Usuarios → [usuario] → pestaña "Impresión"`
----
-### 7f forzar inslacion de dependencias
 
-```bash
-make odoo-force-deps
-```
+---
+ 
+**Limitaciones conocidas de la UI**
+
+"Cancel All Jobs" da error Unauthorized
+El botón de cancelar trabajos desde la UI de Odoo falla porque CUPS rechaza operaciones administrativas IPP desde conexiones remotas (Docker) sin autenticación. No afecta la impresión. Usar siempre desde terminal:
+
 En lugar de cancel all runnning jobs de la impresora de interes
 ```bash
 sudo cancel -a PDF_FILTRADO  # corregir para el uso desde la ui
 ```
 
-### 7g — Configurar el driver de la impresora para modo "Raw"
-Esta configuración evita que Odoo se quede bloqueado en estado "Printing..." al eliminar la espera de confirmación de estado innecesaria.
+**La impresora NO debe configurarse en modo `Raw`**
 
-1. Accede a la interfaz de administración de CUPS: `http://localhost:631/admin`.
-2. Ve a la pestaña **Impresoras** y selecciona `PDF_FILTRADO`.
-3. En el menú **Administración**, haz clic en **Modificar impresora**.
-4. En la página de Marca, haz clic en el botón **"Seleccione otra marca/fabricante"**.
-5. Selecciona **"Raw"** de la lista y haz clic en **Continuar**.
-6. En Modelo, selecciona **"Raw Queue (en)"** y haz clic en **Modificar impresora**.
+Cambiar el driver a `Raw` desde `http://localhost:631/admin` hace que los PDFs salgan vacíos (`0.pdf` de ~2KB). La impresora `PDF_FILTRADO` debe mantener siempre el PPD genérico (`drv:///sample.drv/generic.ppd`) que asigna `make cups-printer`. Si accidentalmente se cambió a Raw, restaurar con:
+```bash
+sudo lpadmin -p PDF_FILTRADO -v cups-pdf:/ -m "drv:///sample.drv/generic.ppd" -E
+sudo lpadmin -d PDF_FILTRADO
+sudo service cups restart
+```
+O en su defecto para corregir  usar
 
-> **¿Por qué este paso es vital?**
-> Al configurar el driver como `Raw`, transformas la impresora en un canal de paso directo. Odoo ya no espera señales bidireccionales de estado (que la impresora virtual no puede enviar), logrando que la UI de Odoo marque el trabajo como completado inmediatamente después del envío.
+```bash
+make cups-printer-fix
+```
+**CUPS no persiste entre reinicios de WSL** 
+WSL2 no mantiene servicios entre sesiones. 
+Si ya se siguió el flujo de instalacion, al iniciar una nueva sesión de trabajo, siempre ejecutar primero: 
+```bash
+make cups-start 
+```
+sin embargo esto ya es prerrequisito de start-all
+
+```bash
+make start-all
+```
+Quien llama a cups-start y up
+
+---
+
+Luego, nuevamente en localhost:8075 (ODOO_PORT) 
 
 ---
 
@@ -321,10 +354,10 @@ Esta configuración evita que Odoo se quede bloqueado en estado "Printing..." al
 Para aplicar el cambio de driver inmediatamente, reinicia el demonio de CUPS:
 
 ```bash
-sudo systemctl restart cups
+sudo service cups restart
 ```
 
-### 7i — NOTA: Preparación para impresoras físicas (Zebra/Epson)
+### NOTA: Preparación para impresoras físicas (Zebra/Epson)
 La configuración en modo `Raw` que hemos realizado en `localhost:631` es ideal para tu entorno de desarrollo, pero cuando conectes una impresora física (como una térmica o de etiquetas), deberás ajustar este parámetro.
 
 > **¿Cómo migrar a una impresora real?**
@@ -338,6 +371,14 @@ La configuración en modo `Raw` que hemos realizado en `localhost:631` es ideal 
 El sistema de colas y el registro en Odoo seguirán funcionando exactamente igual, garantizando una transición suave hacia el hardware real.
 
 ---
+### instalar el modulo a probar
+En este caso employees
+
+1. Activar el modulo (esto demora algunos segundos)
+2. Una vez activado (actualizar la pagina de ser necesario)
+3. Ajustes→ Printing → Reports→Print Babge : 
+   - Default Behaviour : name = enviar a printer(ejemplo) type=send to Printer
+   - Default Printer : NUESTRA_IMPRESORA
 
 ## Paso 8 — Preparar la carpeta de salida
 
@@ -374,13 +415,13 @@ PDF_FILTRADO
    ```bash
    traer_pdf
    ls -l /var/spool/cups-pdf/ANONYMOUS/
-   ls -l /home/esau/odoo19_test_impresora/impresiones_badge
+   ls -l /home/esau/odoo19_test_impresora/impresiones_badge # la ruta de tu OUTPUT_DIR=/home/esau/impresora/impresiones_badge
    ```
 5. El archivo `Badge_-_NombreEmpleado.pdf` debe aparecer con contenido válido (~40-50 KB).
 
 Para acceder desde Windows:
-```
-\\wsl.localhost\Ubuntu\home\esau\odoo19_test_impresora\impresiones_badge
+```bash
+\\wsl.localhost\Ubuntu\home\esau\odoo19_test_impresora\impresiones_badge  #OUTPUT_DIR=/home/esau/impresora/impresiones_badge
 ```
 
 ---
@@ -402,6 +443,8 @@ sudo tail -f /var/log/cups/error_log
 
 # Ver trabajos de impresión pendientes en el sistema
 lpstat -o
+#que dispositivo usa la impresora
+lpstat -v
 
 # Verificar que CUPS escucha en el puerto 631
 sudo ss -tulnp | grep 631

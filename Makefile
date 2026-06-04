@@ -3,15 +3,16 @@
 #  Proyecto: TutorialOdoo / Odoo-19-Develop
 # ============================================================
 
--include .env.impresora
+-include .env
 export
+ENV_FILE=.env
 
 USER        ?= $(shell whoami)
 CUPS_SPOOL  := /var/spool/cups-pdf/ANONYMOUS
 OCA_REPO    := https://github.com/OCA/report-print-send.git
 OCA_BRANCH  := 17.0
 
-.PHONY: cups-start up all all-start odoo-download-mod check-env cups-install cups-printer cups-perms \
+.PHONY: cups-start fix-env cups-printer-fix up all all-start odoo-download-mod check-env cups-install cups-printer cups-perms \
         odoo-module-install odoo-fix-manifest odoo-fix-registry odoo-fix-views \
         odoo-deps odoo-update odoo-force-deps traer-pdf bashrc-fn \
         status clean help
@@ -23,8 +24,23 @@ cups-start:
 	else \
 		sudo service cups start && echo "CUPS iniciado correctamente."; \
 	fi
+# Target para limpiar el archivo .env de forma total 
+fix-env:
+	@echo ">>> Normalizando $(ENV_FILE)..."
+	@# Eliminar caracteres Windows, espacios extra al inicio/final y asegurar formato
+	@if [ -f $(ENV_FILE) ]; then \
+		sed -i 's/\r//g' $(ENV_FILE); \
+		sed -i 's/^[[:space:]]*//;s/[[:space:]]*$$//' $(ENV_FILE); \
+		sed -i '/^$$/d' $(ENV_FILE); \
+		sed -i 's/=[[:space:]]*/=/' $(ENV_FILE); \
+		echo ">>> Archivo $(ENV_FILE) validado."; \
+	else \
+		echo ">>> [ERROR] $(ENV_FILE) no encontrado."; exit 1; \
+	fi
+	cat -A .env
+	
 # docker compose up -d
-up: check-env
+up: fix-env check-env
 	@echo ">>> Creando carpetas locales de datos con permisos correctos..."
 	mkdir -p ./odoo_test_data
 	mkdir -p $(ADDONS_DIR)
@@ -33,21 +49,33 @@ up: check-env
 	sudo chmod -R 777 $(ADDONS_DIR)
 	sudo chmod -R 777 $(OUTPUT_DIR)
 	@echo ">>> Levantando contenedores en segundo plano..."
-	docker compose up -d
-	@echo ">>> Contenedores iniciados. Odoo respondiendo en localhost:8071"
+	docker compose --env-file .env up -d 
+	@echo ">>> Contenedores iniciados. Odoo respondiendo en localhost:$(ODOO_PORT)"
 #validando variables de existan
 check-env:
 ifndef ODOO_DB
-	$(error El archivo .env.impresora no existe o le falta la variable ODOO_DB. Copia .env.example a .env y configúralo)
+	$(error El archivo .env
+	 no existe o le falta la variable ODOO_DB. Copia .env.example a .env y configúralo)
 endif
 ifndef ODOO_CTR
-	$(error Falta la variable ODOO_CTR en tu .env.impresora)
+	$(error Falta la variable ODOO_CTR en tu .env
+	)
+endif
+ifndef DB_PORT
+	$(error Falta la variable DB_PORT en tu .env
+	)
+endif
+ifndef ODOO_PORT
+	$(error Falta la variable ODOO_PORT en tu .env
+	)
 endif
 ifndef ADDONS_DIR
-	$(error Falta la variable ADDONS_DIR en tu .env.impresora)
+	$(error Falta la variable ADDONS_DIR en tu .env
+	)
 endif
 ifndef OUTPUT_DIR
-	$(error Falta la variable OUTPUT_DIR en tu .env.impresora)
+	$(error Falta la variable OUTPUT_DIR en tu .env
+	)
 endif
 
 # ── Objetivo principal ───────────────────────────────────────
@@ -99,6 +127,7 @@ cups-perms: check-env
 	@echo ">>> Ajustando permisos del spool CUPS..."
 	sudo chown -R lp:lp $(CUPS_SPOOL)/..
 	sudo chmod 777 $(CUPS_SPOOL)
+	sudo chmod g+s $(CUPS_SPOOL)
 	@echo ">>> Permisos aplicados."
 
 # ── 4. Dependencias Python dentro del contenedor Odoo ────────
@@ -229,6 +258,16 @@ odoo-update: check-env
 	docker restart $(ODOO_CTR)
 	@echo ">>> Módulo instalado y contenedor reiniciado."
 # ── Definición de la función (con etiquetas de control)
+# Configuración definitiva del driver genérico para evitar errores de filtro
+cups-printer-fix:
+	@echo ">>> Configurando impresora PDF_FILTRADO con PPD genérico..."
+	sudo lpadmin -p PDF_FILTRADO -v cups-pdf:/ -m "drv:///sample.drv/generic.ppd" -E
+	sudo lpadmin -d PDF_FILTRADO
+	sudo service cups restart
+	@echo ">>> Verificación de PPD:"
+	@lpoptions -p PDF_FILTRADO -l | head -3
+	@echo ">>> ¡Impresora lista! Prueba ahora imprimir desde Odoo."
+#---
 define BASHRC_FUNC
 # --- INICIO_TRAER_PDF ---
 traer_pdf() {
