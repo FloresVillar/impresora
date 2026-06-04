@@ -4,3 +4,6 @@ odoo_test_data/
 addons_custom/
 impresiones_badge/
 .env
+__pycache__/
+*.pyc
+.DS_Store

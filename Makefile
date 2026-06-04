@@ -271,13 +271,12 @@ cups-printer-fix:
 define BASHRC_FUNC
 # --- INICIO_TRAER_PDF ---
 traer_pdf() {
-    local SRC="$(CUPS_SPOOL)"
+    local SRC="/var/spool/cups-pdf/ANONYMOUS"
     local DST="$(OUTPUT_DIR)"
-    echo "Buscando archivos en $$SRC ..."
-    sudo find "$$SRC" -maxdepth 1 -name "*.pdf" -exec sh -c \
-        'sudo cat "$$1" > "'"$$DST"'/$$(basename "$$1")" && sudo chown $(USER):$(USER) "'"$$DST"'/$$(basename "$$1")"' \
-        _ {} \;
-    echo "¡Operación completada! PDFs en $$DST"
+    echo "Buscando archivos nuevos en $$SRC ..."
+    sudo rsync -a --update --chown=$(USER):$(USER) "$$SRC"/*.pdf "$$DST"/ 2>/dev/null && \
+        echo "¡Operación completada! PDFs en $$DST" || \
+        echo "No hay archivos PDF nuevos en $$SRC"
 }
 # --- FIN_TRAER_PDF ---
 endef
