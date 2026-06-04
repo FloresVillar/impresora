@@ -12,7 +12,7 @@ CUPS_SPOOL  := /var/spool/cups-pdf/ANONYMOUS
 OCA_REPO    := https://github.com/OCA/report-print-send.git
 OCA_BRANCH  := 17.0
 
-.PHONY: cups-start fix-env cups-printer-fix up all all-start odoo-download-mod check-env cups-install cups-printer cups-perms \
+.PHONY: cups-start fix-env cups-printer-fix up down restart-net all all-start odoo-download-mod check-env cups-install cups-printer cups-perms \
         odoo-module-install odoo-fix-manifest odoo-fix-registry odoo-fix-views \
         odoo-deps odoo-update odoo-force-deps traer-pdf bashrc-fn \
         status clean help
@@ -48,9 +48,22 @@ up: fix-env check-env
 	sudo chmod -R 777 ./odoo_test_data
 	sudo chmod -R 777 $(ADDONS_DIR)
 	sudo chmod -R 777 $(OUTPUT_DIR)
-	@echo ">>> Levantando contenedores en segundo plano..."
+	@echo ">>> Levantando contenedores en segundo plano...$(PROJECT_NAME)"
 	docker compose --env-file .env up -d 
 	@echo ">>> Contenedores iniciados. Odoo respondiendo en localhost:$(ODOO_PORT)"
+# docker compose down
+down: check-env
+	@echo ">>> Deteniendo y eliminando contenedores..."
+	docker compose --env-file .env down
+	@echo ">>> Contenedores detenidos."
+
+# Recrea contenedores aplicando cambios de red del docker-compose.yml
+# Docker prefija el nombre del proyecto al nombre de la red (ej: impresora_test_impresora_net)
+restart-net: down up
+	@echo ">>> Contenedores recreados con nueva configuración de red."
+	@echo ">>> Verificando gateway de la red..."
+	@NET=$$(docker network ls --filter name=impresora_net --format '{{.Name}}' | head -1); 	docker network inspect $$NET | grep Gateway
+
 #validando variables de existan
 check-env:
 ifndef ODOO_DB
@@ -125,7 +138,10 @@ cups-printer: check-env
 # ── 3. Corregir permisos del spool ───────────────────────────
 cups-perms: check-env
 	@echo ">>> Ajustando permisos del spool CUPS..."
-	sudo chown -R lp:lp $(CUPS_SPOOL)/..
+	@# cups-pdf corre como 'nobody' — debe ser dueño de ANONYMOUS/ para escribir archivos
+	@# chown lp:lp FALLA: nobody no puede hacer chmod sobre archivos que no le pertenecen
+	sudo chown -R nobody:lp $(CUPS_SPOOL)
+	sudo chown lp:lp $(CUPS_SPOOL)/..
 	sudo chmod 777 $(CUPS_SPOOL)
 	sudo chmod g+s $(CUPS_SPOOL)
 	@echo ">>> Permisos aplicados."

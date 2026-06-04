@@ -1,3 +1,11 @@
+networks:
+  impresora_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+          gateway: 172.30.0.1  # IP fija — usar esta en Odoo: Ajustes → Técnico → Impresión → Servidores
+
 services:
   myDB19_test:
     image: postgres:15
@@ -16,6 +24,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - impresora_net
 
   odoo_test:
     image: odoo:19.0
@@ -35,3 +45,5 @@ services:
       - ./addons_custom:/mnt/extra-addons  # Aquí meterás el módulo base_report_to_printer
       - ./config/odoo.conf:/etc/odoo/odoo.conf:ro
       - ./odoo_test_data:/var/lib/odoo
+    networks:
+      - impresora_net
