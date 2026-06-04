@@ -31,6 +31,12 @@ nano .env.impresora
 echo ".env.impresora" >> .gitignore
    ```
 ---
+## Paso -2 - levanta servicio de impresion de linux
+De modo que el puerto 631 quede escuchando
+```bash
+make cups-start
+```
+---
 ## Paso -1 - levantar los contenedores
 ```bash
 make up
@@ -43,6 +49,42 @@ Seguidamente en localhost:8071 usar las variables de entorno de odoo.conf : admi
 ```bash
 make odoo-download-mod
 ```
+## Paso 0.5 — Configuración global de CUPS-PDF  Solo una vez por máquina
+
+> **Por qué:** Por defecto, `cups-pdf` escribe los PDFs en `${HOME}/PDF`, que bajo WSL equivale a `/root/PDF/` — una carpeta inaccesible para tu usuario. Este paso redirige la salida al directorio estándar del spool (`/var/spool/cups-pdf/ANONYMOUS/`), que es donde el resto de la configuración espera encontrar los archivos.
+>
+> **Este paso solo se realiza una vez por máquina nueva.** No forma parte del `Makefile` porque es una configuración del sistema operativo, independiente del proyecto.
+
+1. Abre el archivo de configuración:
+
+```bash
+sudo nano /etc/cups/cups-pdf.conf
+```
+
+2. Busca la directiva `Out` y asegúrate de que quede así:
+
+```
+### Key: Out
+##  Out: Output directory.
+Out /var/spool/cups-pdf/ANONYMOUS
+```
+
+3. Guarda el archivo (`Ctrl+O`, `Enter`, `Ctrl+X`) y reinicia CUPS:
+
+```bash
+sudo service cups restart
+```
+
+4. Verifica que el directorio de salida existe y tiene permisos correctos (esto lo aplica también `make cups-perms` más adelante):
+
+```bash
+sudo chmod 777 /var/spool/cups-pdf/ANONYMOUS
+sudo ls -ld /var/spool/cups-pdf/ANONYMOUS
+# Debe mostrar: drwxrwxrwx ... /var/spool/cups-pdf/ANONYMOUS
+```
+
+---
+
 ---
 ## Paso 1 — Instalar y levantar CUPS con filtros reales
 
@@ -249,6 +291,51 @@ docker exec odoo19-server-dev odoo -d odoo_aje -u base_report_to_printer --stop-
 
 ### 7e — Configurar impresora predeterminada por usuario *(opcional)*
 `Ajustes → Usuarios → [usuario] → pestaña "Impresión"`
+---
+### 7f forzar inslacion de dependencias
+
+```bash
+make odoo-force-deps
+```
+En lugar de cancel all runnning jobs de la impresora de interes
+```bash
+sudo cancel -a PDF_FILTRADO  # corregir para el uso desde la ui
+```
+
+### 7g — Configurar el driver de la impresora para modo "Raw"
+Esta configuración evita que Odoo se quede bloqueado en estado "Printing..." al eliminar la espera de confirmación de estado innecesaria.
+
+1. Accede a la interfaz de administración de CUPS: `http://localhost:631/admin`.
+2. Ve a la pestaña **Impresoras** y selecciona `PDF_FILTRADO`.
+3. En el menú **Administración**, haz clic en **Modificar impresora**.
+4. En la página de Marca, haz clic en el botón **"Seleccione otra marca/fabricante"**.
+5. Selecciona **"Raw"** de la lista y haz clic en **Continuar**.
+6. En Modelo, selecciona **"Raw Queue (en)"** y haz clic en **Modificar impresora**.
+
+> **¿Por qué este paso es vital?**
+> Al configurar el driver como `Raw`, transformas la impresora en un canal de paso directo. Odoo ya no espera señales bidireccionales de estado (que la impresora virtual no puede enviar), logrando que la UI de Odoo marque el trabajo como completado inmediatamente después del envío.
+
+---
+
+### 7h — Reiniciar el servicio de impresión
+Para aplicar el cambio de driver inmediatamente, reinicia el demonio de CUPS:
+
+```bash
+sudo systemctl restart cups
+```
+
+### 7i — NOTA: Preparación para impresoras físicas (Zebra/Epson)
+La configuración en modo `Raw` que hemos realizado en `localhost:631` es ideal para tu entorno de desarrollo, pero cuando conectes una impresora física (como una térmica o de etiquetas), deberás ajustar este parámetro.
+
+> **¿Cómo migrar a una impresora real?**
+> Cuando sustituyas la impresora virtual por una física, no será necesario crear una impresora nueva en Odoo. Simplemente:
+> 1. Accede nuevamente a `http://localhost:631/admin`.
+> 2. Selecciona `PDF_FILTRADO` (o el nombre que tenga tu impresora).
+> 3. En el menú **Administración**, elige **Modificar impresora**.
+> 4. En lugar de seleccionar "Raw", selecciona el **fabricante y el modelo específico (PPD)** de tu nueva impresora física.
+> 5. Esto permitirá que Odoo envíe los comandos de lenguaje de impresión (como ZPL para Zebra o ESC/POS para Epson) directamente al hardware.
+
+El sistema de colas y el registro en Odoo seguirán funcionando exactamente igual, garantizando una transición suave hacia el hardware real.
 
 ---
 
@@ -286,13 +373,14 @@ PDF_FILTRADO
 4. En WSL2, ejecuta:
    ```bash
    traer_pdf
-   ls -lh ~/TutorialOdoo/impresiones_badge/
+   ls -l /var/spool/cups-pdf/ANONYMOUS/
+   ls -l /home/esau/odoo19_test_impresora/impresiones_badge
    ```
 5. El archivo `Badge_-_NombreEmpleado.pdf` debe aparecer con contenido válido (~40-50 KB).
 
 Para acceder desde Windows:
 ```
-\\wsl$\Ubuntu\home\<tu_usuario>\TutorialOdoo\impresiones_badge\
+\\wsl.localhost\Ubuntu\home\esau\odoo19_test_impresora\impresiones_badge
 ```
 
 ---
@@ -300,41 +388,52 @@ Para acceder desde Windows:
 ## Monitoreo y depuración
 
 ```bash
-# Ver estado general
+# Iniciar infraestructura de impresión (obligatorio tras reiniciar)
+make cups-start
+
+# Ver estado general del entorno
 make status
 
-# Log de CUPS en tiempo real
+# Limpiar cola de impresión (si Odoo marca error o se bloquea)
+sudo cancel -a PDF_FILTRADO
+
+# Log de CUPS en tiempo real (para ver errores de drivers/filtros)
 sudo tail -f /var/log/cups/error_log
 
-# Ver trabajos de impresión pendientes
+# Ver trabajos de impresión pendientes en el sistema
 lpstat -o
 
 # Verificar que CUPS escucha en el puerto 631
 sudo ss -tulnp | grep 631
 
-# Verificar conectividad desde el contenedor Odoo
-docker exec odoo19-server-dev curl -s http://172.17.0.1:631/printers/ | grep -o 'PDF[^<]*'
+# Verificar conectividad desde el contenedor Odoo hacia el host
+docker exec odoo19-server-dev curl -s [http://172.17.0.1:631/printers/](http://172.17.0.1:631/printers/) | grep -o 'PDF[^<]*'
 ```
-
 ---
 
 ## Referencia rápida de comandos Makefile
 
 | Comando | Descripción |
 |---------|-------------|
+| `make cups-start` | **[EJECUTAR CADA SESIÓN]** Levanta el servicio CUPS |
 | `make all` | Flujo completo (primera vez) |
-| `make cups-install` | Instala/reinstala CUPS con filtros |
-| `make cups-printer` | Registra impresora `PDF_FILTRADO` |
-| `make cups-perms` | Corrige permisos del spool |
+| `make up` | Levanta los contenedores Odoo |
+| `make start-all` | Receta de inicio rapido,require que el flujo se haya completado antes |
+| `make cups-install` | Instala CUPS y filtros necesarios |
+| `make cups-printer` | Registra la impresora `PDF_FILTRADO` |
+| `make cups-perms` | Corrige permisos del directorio de spool |
 | `make odoo-deps` | Instala `pycups` en el contenedor |
-| `make odoo-fix-registry` | Parchea importación de Registry |
-| `make odoo-fix-views` | Corrige `res_users.xml` |
+| `make odoo-fix-manifest` | Parchea versión en `__manifest__.py` |
+| `make odoo-fix-registry` | Parchea importación de `registry` |
+| `make odoo-fix-views` | Reemplaza `res_users.xml` |
+| `make odoo-fix-data` | Elimina datos incompatibles (`ir.property`) |
+| `make odoo-fix-tags` | Migra etiquetas `<tree>` a `<list>` |
+| `make odoo-fix-actions` | Sanea `view_mode` a `list` |
 | `make odoo-update` | Instala/actualiza el módulo en Odoo |
-| `make traer-pdf` | Crea carpeta de salida |
-| `make bashrc-fn` | Agrega función `traer_pdf` al `.bashrc` |
-| `make status` | Muestra estado del entorno |
-| `make clean` | Limpia PDFs del spool y carpeta de trabajo |
-
+| `make traer-pdf` | Prepara carpeta de salida (`impresiones_badge`) |
+| `make bashrc-fn` | Configura función `traer_pdf` en el `.bashrc` |
+| `make status` | Resumen del estado de servicios y archivos |
+| `make clean` | Limpieza total de PDFs generados |
 Variables personalizables:
 ```bash
 make all ODOO_DB=mi_db ODOO_CTR=mi_contenedor USER=mi_usuario

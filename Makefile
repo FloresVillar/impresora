@@ -11,10 +11,18 @@ CUPS_SPOOL  := /var/spool/cups-pdf/ANONYMOUS
 OCA_REPO    := https://github.com/OCA/report-print-send.git
 OCA_BRANCH  := 17.0
 
-.PHONY: up all odoo-download-mod check-env cups-install cups-printer cups-perms \
+.PHONY: cups-start up all all-start odoo-download-mod check-env cups-install cups-printer cups-perms \
         odoo-module-install odoo-fix-manifest odoo-fix-registry odoo-fix-views \
-        odoo-deps odoo-update traer-pdf bashrc-fn \
+        odoo-deps odoo-update odoo-force-deps traer-pdf bashrc-fn \
         status clean help
+# 
+cups-start:
+	@echo "--- Iniciando servicio CUPS ---"
+	@if sudo service cups status | grep -q "is running"; then \
+		echo "CUPS ya está corriendo."; \
+	else \
+		sudo service cups start && echo "CUPS iniciado correctamente."; \
+	fi
 # docker compose up -d
 up: check-env
 	@echo ">>> Creando carpetas locales de datos con permisos correctos..."
@@ -43,9 +51,12 @@ ifndef OUTPUT_DIR
 endif
 
 # ── Objetivo principal ───────────────────────────────────────
-all: check-env odoo-dowload-mod cups-install cups-printer cups-perms odoo-deps odoo-fix-manifest odoo-fix-registry odoo-fix-views odoo-update
+all: check-env cups-start odoo-dowload-mod cups-install cups-printer cups-perms odoo-deps odoo-force-deps odoo-fix-manifest odoo-fix-registry odoo-fix-views odoo-update
 	@echo ""
 	@echo " Configuración completa. Revisa la guía para los pasos manuales en la UI."
+# -- inicio rapido
+start-all: cups-start up
+	@echo ">> sistema listo "
 
 # descargando el modulo de la OCA
 odoo-download-mod: check-env
@@ -199,6 +210,15 @@ odoo-fix-actions: check-env
 		exit 1; \
 	fi
 
+# ── 4b. Rescate: Instalación forzada de dependencias (para evitar errores de upgrade)
+odoo-force-deps: check-env
+	@echo ">>> Instalando dependencias críticas (libcups2-dev, gcc, pycups) en el contenedor..."
+	docker exec -u root $(ODOO_CTR) apt-get update -qq
+	docker exec -u root $(ODOO_CTR) apt-get install -y libcups2-dev gcc python3-dev
+	docker exec -u root $(ODOO_CTR) pip3 install pycups --break-system-packages
+	docker restart $(ODOO_CTR)
+	@echo ">>> Dependencias instaladas. Intenta el upgrade nuevamente."
+
 # ── 6. Actualizar/instalar el módulo en Odoo ─────────────────
 odoo-update: check-env
 	@echo ">>> Instalando base_report_to_printer en la base $(ODOO_DB)..."
@@ -208,9 +228,9 @@ odoo-update: check-env
 	    --stop-after-init
 	docker restart $(ODOO_CTR)
 	@echo ">>> Módulo instalado y contenedor reiniciado."
-
-#8 traer_pdf: copia los PDFs generados por CUPS a la carpeta de trabajo ---
+# ── Definición de la función (con etiquetas de control)
 define BASHRC_FUNC
+# --- INICIO_TRAER_PDF ---
 traer_pdf() {
     local SRC="$(CUPS_SPOOL)"
     local DST="$(OUTPUT_DIR)"
@@ -220,6 +240,7 @@ traer_pdf() {
         _ {} \;
     echo "¡Operación completada! PDFs en $$DST"
 }
+# --- FIN_TRAER_PDF ---
 endef
 export BASHRC_FUNC
 
@@ -230,12 +251,14 @@ traer-pdf: $(OUTPUT_DIR)
 $(OUTPUT_DIR):
 	mkdir -p $(OUTPUT_DIR)
 
-# ── Inyectar función limpia en ~/.bashrc ──────────────────
+# ── Inyectar/Actualizar función en ~/.bashrc (El motor de reemplazo) ──
 bashrc-fn: check-env
-	@echo ">>> Agregando función traer_pdf a ~/.bashrc ..."
-	@grep -q "traer_pdf()" ~/.bashrc || printf '%s\n' "$$BASHRC_FUNC" >> ~/.bashrc
-	@echo ">>> Recarga con: source ~/.bashrc"
-
+	@echo ">>> Actualizando traer_pdf en ~/.bashrc..."
+	@# 1. Si el bloque existe, lo borramos usando las etiquetas como anclas
+	@sed -i '/# --- INICIO_TRAER_PDF ---/,/# --- FIN_TRAER_PDF ---/d' ~/.bashrc
+	@# 2. Añadimos el bloque fresco al final
+	@printf '%s\n' "$$BASHRC_FUNC" >> ~/.bashrc
+	@echo ">>> ¡Actualizado correctamente! Recarga con: source ~/.bashrc"
 # ── Utilidades ───────────────────────────────────────────────
 status: check-env
 	@echo "=== Estado de CUPS ==="

@@ -1,4 +1,2 @@
 # Comandos de ejecucion
-```bash
-
-```
+Seguir Guia_impresion_Odoo.md
