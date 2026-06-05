@@ -7,3 +7,4 @@ impresiones_badge/
 __pycache__/
 *.pyc
 .DS_Store.env
+.env

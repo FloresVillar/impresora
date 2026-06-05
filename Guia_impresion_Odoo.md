@@ -14,8 +14,8 @@ Odoo (Docker) → módulo base_report_to_printer → CUPS (WSL2) → cups-pdf (P
 .
 ├── Makefile
 ├── docker-compose.yml
-├── .env                  ← tus valores locales, NO se sube al repo
-├── .env.example          ← plantilla, se sube al repo
+├── .env                  
+├── .env.impresora.example           
 ├── .gitignore
 └── config/
     └── odoo.conf
@@ -30,7 +30,7 @@ Odoo (Docker) → módulo base_report_to_printer → CUPS (WSL2) → cups-pdf (P
 ### 0 — Clonar y configurar variables de entorno
 
 ```bash
-cp .env.example .env
+cp .env.impresora.example .env
 nano .env          # edita DB, contenedor, puertos y rutas
 echo ".env" >> .gitignore
 ```
@@ -136,6 +136,11 @@ make odoo-fix-tags       # <tree> → <list>
 make odoo-fix-actions    # view_mode="tree" → view_mode="list"
 ```
 
+o el pipeline para fix
+```bash
+make odoo-patch-all
+```
+
 ---
 
 ### 9 — Instalar el módulo en Odoo
@@ -171,6 +176,7 @@ Luego ir a `localhost:ODOO_PORT` e ingresar credenciales de `config/odoo.conf`.
 > docker network ls --filter name=impresora_net
 > docker network inspect <nombre_red> | grep Gateway
 > ```
+el nombre de la red esta definido en el docker-compose.yml
 
 **10d — Registrar la impresora**
 `Ajustes → Técnico → Impresión → Impresoras → Nueva`
@@ -178,7 +184,7 @@ Luego ir a `localhost:ODOO_PORT` e ingresar credenciales de `config/odoo.conf`.
 | Campo | Valor |
 |-------|-------|
 | Display name | PDF_FILTRADO |
-| System Name | PDF_FILTRADO |
+| System Name (cups-printer sudo lpadmin -p PDF_FILTRADO ) | PDF_FILTRADO |
 | Servidor | CUPS Local |
 
 Clic en **Actualizar impresoras** → debe quedar en verde.
@@ -186,10 +192,15 @@ Clic en **Actualizar impresoras** → debe quedar en verde.
 **10e — Impresora predeterminada por usuario** *(opcional)*
 `Ajustes → Usuarios → [usuario] → pestaña "Impresión"`
 
-**10f — Configurar reporte de insignia**
+**10f — Activar en modulo Employee** 
+`Apps → Employees (ACTIVAR)`
+
+**10g — Configurar reporte de insignia**
 `Ajustes → Printing → Reports → Print Badge`:
-- Default Behaviour: `Send to Printer`
-- Default Printer: `PDF_FILTRADO`
+- Default Behaviour: create , 
+    - name: imprimir 
+    - type: `Send to Printer`
+- Default Printer(nombre de la impresora): `PDF_FILTRADO`
 
 ---
 
@@ -208,8 +219,10 @@ source ~/.bashrc
 1. `Empleados → [empleado] → Imprimir insignia`
 2. En WSL2:
 ```bash
+ls -l /var/spool/cups-pdf/ANONYMOUS/
 traer_pdf
 ls -l $OUTPUT_DIR
+ls -l /home/esau/impresora_test_jueves/impresiones_badge
 # Badge_-_NombreEmpleado.pdf (~48 KB)
 ```
 

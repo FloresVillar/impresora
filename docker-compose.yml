@@ -1,5 +1,6 @@
 networks:
   impresora_net:
+    name: impresora_global
     driver: bridge
     ipam:
       config:

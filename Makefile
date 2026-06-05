@@ -13,7 +13,7 @@ OCA_REPO    := https://github.com/OCA/report-print-send.git
 OCA_BRANCH  := 17.0
 
 .PHONY: cups-start fix-env cups-printer-fix up down restart-net all all-start odoo-download-mod check-env cups-install cups-printer cups-perms \
-        odoo-module-install odoo-fix-manifest odoo-fix-registry odoo-fix-views \
+        odoo-module-install odoo-fix-manifest odoo-fix-registry odoo-fix-views odoo-fix-tags odoo-fix-actions odoo-patch-all\
         odoo-deps odoo-update odoo-force-deps traer-pdf bashrc-fn \
         status clean help
 # 
@@ -92,7 +92,7 @@ ifndef OUTPUT_DIR
 endif
 
 # ── Objetivo principal ───────────────────────────────────────
-all: check-env cups-start odoo-dowload-mod cups-install cups-printer cups-perms odoo-deps odoo-force-deps odoo-fix-manifest odoo-fix-registry odoo-fix-views odoo-update
+all: check-env cups-start odoo-dowload-mod cups-install cups-printer cups-perms odoo-deps odoo-force-deps odoo-fix-manifest odoo-fix-registry odoo-fix-views odoo-fix-data odoo-fiix-tags odoo-fix-actions odoo-update
 	@echo ""
 	@echo " Configuración completa. Revisa la guía para los pasos manuales en la UI."
 # -- inicio rapido
@@ -254,7 +254,9 @@ odoo-fix-actions: check-env
 		echo ">>> [ERROR] No se encontró la carpeta del módulo"; \
 		exit 1; \
 	fi
-
+# Agrupa todos los parches de Odoo 19
+odoo-patch-all: odoo-fix-manifest odoo-fix-registry odoo-fix-views odoo-fix-data odoo-fix-tags odoo-fix-actions
+	@echo ">>> Todos los parches de Odoo 19 han sido aplicados con éxito."
 # ── 4b. Rescate: Instalación forzada de dependencias (para evitar errores de upgrade)
 odoo-force-deps: check-env
 	@echo ">>> Instalando dependencias críticas (libcups2-dev, gcc, pycups) en el contenedor..."
