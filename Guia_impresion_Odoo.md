@@ -184,7 +184,7 @@ el nombre de la red esta definido en el docker-compose.yml
 | Campo | Valor |
 |-------|-------|
 | Display name | PDF_FILTRADO |
-| System Name (cups-printer sudo lpadmin -p PDF_FILTRADO ) | PDF_FILTRADO |
+| System Name (cups-printer: sudo lpadmin -p PDF_FILTRADO ) | PDF_FILTRADO |
 | Servidor | CUPS Local |
 
 Clic en **Actualizar impresoras** → debe quedar en verde.
