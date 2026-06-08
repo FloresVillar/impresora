@@ -40,7 +40,7 @@ fix-env:
 	cat -A .env
 	
 # docker compose up -d
-up: fix-env check-env
+up: fix-env check-env 
 	@echo ">>> Creando carpetas locales de datos con permisos correctos..."
 	mkdir -p ./odoo_test_data
 	mkdir -p $(ADDONS_DIR)
@@ -337,14 +337,32 @@ clean: check-env
 	rm -f $(OUTPUT_DIR)/*.pdf
 	@echo ">>> Limpieza completada."
 
-# IMPRESORA REAL 
-dependencias-impresora-real: 
+# -----------------IMPRESORA REAL---------------------
+#----------------------------------------------------- 
+dependencias-impresora-real-p: 
 	sudo apt update
 	sudo apt install -y usbutils cups cups-ipp-utils printer-driver-gutenprint printer-driver-all avahi-daemon
 	sudo service avahi-daemon start
 	sudo service cups restart
 
-DEVICE_URI := $(shell lpinfo -v | grep -E "direct usb://|network (ipp|dnssd)://" | head -n 1 | cut -d ' ' -f 2)
+dependencias-impresora-real:
+	@echo ">>> Verificando dependencias..."
+	@# Lista de paquetes necesarios
+	@PACKAGES="usbutils cups cups-ipp-utils printer-driver-gutenprint printer-driver-all"; \
+	for pkg in $$PACKAGES; do \
+		if dpkg -s $$pkg >/dev/null 2>&1; then \
+			echo "  [OK] $$pkg ya está instalado"; \
+		else \
+			echo "  [!] Instalando $$pkg..."; \
+			sudo apt update && sudo apt install -y $$pkg; \
+		fi \
+	done
+	@echo ">>> Iniciando servicios..." 
+	sudo service cups restart
+
+# Busca líneas que empiecen por 'direct usb://' o 'network ipp://'
+# El 'awk' extrae el segundo campo sin importar si hay uno o diez espacios
+DEVICE_URI := $(shell lpinfo -v | grep -E '^(direct usb|network ipp)://' | head -n 1 | awk '{print $$2}')
 
 configuracion-impresora-real: 
 	@echo "detectando impresoras disponibles"
@@ -365,13 +383,13 @@ configuracion-impresora-real:
 prueba-impresora-real: 
 	echo "Prueba de impresion $(NOMBRE_IMPRESORA)" | lp -d "$(NOMBRE_IMPRESORA)"
 
-actualizar-impresora-real:
+actualizar-limpiar-impresora-real:
 	sudo cancel -a "$(NOMBRE_IMPRESORA)"
 
 monitoreo-impresora-real:
 	lpstat -p
-	lpstat -o "$(EPSON_L3150)"
-	lpstat -W completed -p "$(EPSON_L3150)"
+	lpstat -o "$(NOMBRE_IMPRESORA)"
+	lpstat -W completed -p "$(NOMBRE_IMPRESORA)"
 
 help:
 	@echo ""

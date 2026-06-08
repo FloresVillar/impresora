@@ -335,7 +335,13 @@ docker network inspect <nombre_red> | grep Gateway
 ```
 
 ## Configuracion de una impresora FISICA 
-En este caso una EPSON L3150 
+Si el flujo de parches oca ya se ejecutó
+```bash
+make start-all
+```
+
+Luego  de levantado los servicios , se procede a la "exposicion de servicio mediante red" o "redireccion de dispositivo a nivel de bus" de la impresora, este caso una EPSON L3150  (totalmente arbitrario)
+
 Ir a https://latin.epson.com/soporte y descargar el driver , seguir los pasos para la instalacion.
 
 Ver el tipo de conexion **panel de control** → **dispositivos e impresora** → **IMPRESORA**  → **propiedades de la impresora** → **Puertos** →  se identifica si usa WSD usb o TCP/ip.
@@ -345,6 +351,7 @@ Si la conexion es mediante usb , es necesario configuracion windows para quitarl
 En **administrador de dispositivos** → **deshabilitamos la impresora**
 
 En **powershell modo administrador** 
+La instalacion se puede realizar una sola vez, pero la detencion del servicio en windows se realiza cada inicio de sesion.Es posible que se requiera ejecutar el forzado varias veces, windows tiende a recuperar el control si el usb se desconecta.
 ```bash
 winget install --interactive --exact dorssel.usbipd-win
 
@@ -373,7 +380,7 @@ make prueba-impresora-real
 
 - En la ui de ODOO ,actualizar la impresora , vincularle un server y registrarle como predeterminado.
 
-- Asimismo en ajustes → printers → reports vincular el el "modulo" a la impresora de interes(en este caso EPSON L3150)
+- Asimismo en ajustes → printers → reports: vincular el "modulo" (PASO 10g) a la impresora de interes(en este caso EPSON L3150)
 
 - Enviar el badge a imprimir (el mismo ejemplo que en el caso de la impresora virtual)
 
@@ -390,9 +397,14 @@ sudo cancel -a EPSON_L3150
 ó
 make actualizar-impresora-real
 ```
-
+Para devolver el control a windows y probar otro tipo de comunicacion, en poweshell modo administrador
+```bash
+Start-Service -Name Spooler
+```
 ### Consolidación de los targets
-
+---
+Resumen del flujo completo para una impresora real
+AUN POR COMPLETAR....
 ---
 
 ## Referencia rápida de comandos Makefile
