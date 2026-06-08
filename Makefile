@@ -124,7 +124,7 @@ cups-install: check-env
 	sudo service cups restart
 	@echo ">>> CUPS listo."
 
-# ── 2. Registrar la impresora PDF_FILTRADO ───────────────────
+# ── 2. Registrar la impresora PDF_FILTRADO (el nombre es arbitrario)───────────────────
 cups-printer: check-env
 	@echo ">>> Creando impresora PDF_FILTRADO con PPD genérico..."
 	sudo lpadmin -p PDF_FILTRADO \
@@ -339,11 +339,6 @@ clean: check-env
 
 # -----------------IMPRESORA REAL---------------------
 #----------------------------------------------------- 
-dependencias-impresora-real-p: 
-	sudo apt update
-	sudo apt install -y usbutils cups cups-ipp-utils printer-driver-gutenprint printer-driver-all avahi-daemon
-	sudo service avahi-daemon start
-	sudo service cups restart
 
 dependencias-impresora-real:
 	@echo ">>> Verificando dependencias..."
