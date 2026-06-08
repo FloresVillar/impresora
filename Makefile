@@ -15,7 +15,7 @@ OCA_BRANCH  := 17.0
 .PHONY: cups-start fix-env cups-printer-fix up down restart-net all all-start odoo-download-mod check-env cups-install cups-printer cups-perms \
         odoo-module-install odoo-fix-manifest odoo-fix-registry odoo-fix-views odoo-fix-tags odoo-fix-actions odoo-patch-all\
         odoo-deps odoo-update odoo-force-deps traer-pdf bashrc-fn \
-        status clean help
+        status clean help dependencias-impresora-real configuracion-impresora-real prueba-impresora-real actualizar-impresora-real monitoreo-impresora-real
 # 
 cups-start:
 	@echo "--- Iniciando servicio CUPS ---"
@@ -265,7 +265,7 @@ odoo-force-deps: check-env
 	docker exec -u root $(ODOO_CTR) pip3 install pycups --break-system-packages
 	docker restart $(ODOO_CTR)
 	@echo ">>> Dependencias instaladas. Intenta el upgrade nuevamente."
-
+ 
 # ── 6. Actualizar/instalar el módulo en Odoo ─────────────────
 odoo-update: check-env
 	@echo ">>> Instalando base_report_to_printer en la base $(ODOO_DB)..."
@@ -336,6 +336,42 @@ clean: check-env
 	@echo ">>> Limpiando carpeta de trabajo..."
 	rm -f $(OUTPUT_DIR)/*.pdf
 	@echo ">>> Limpieza completada."
+
+# IMPRESORA REAL 
+dependencias-impresora-real: 
+	sudo apt update
+	sudo apt install -y usbutils cups cups-ipp-utils printer-driver-gutenprint printer-driver-all avahi-daemon
+	sudo service avahi-daemon start
+	sudo service cups restart
+
+DEVICE_URI := $(shell lpinfo -v | grep -E "direct usb://|network (ipp|dnssd)://" | head -n 1 | cut -d ' ' -f 2)
+
+configuracion-impresora-real: 
+	@echo "detectando impresoras disponibles"
+	if [ -z "$(DEVICE_URI)" ]; then \
+		echo "Error: no hay impresoras conectadas ni usb" \
+		exit 1; \
+	fi
+	@echo "Dispositivo $(DEVICE_URI)"
+	@echo "---Reiniciando-- CUPS"
+	sudo service cups restart
+	@echo "--registrando como $(NOMBRE_IMPRESORA)"
+	sudo lpadmin -p "$(NOMBRE_IMPRESORA)" -v "$(DEVICE_URI)" -m drv:///sample.drv/generic.ppd -E
+	@echo "estableciendo a $(NOMBRE_IMPRESORA) como impresora por defecto" 
+	sudo lpadmin -d "$(NOMBRE_IMPRESORA)"
+	@echo "--configuracion realizada" 
+	lpstat -p -d
+
+prueba-impresora-real: 
+	echo "Prueba de impresion $(NOMBRE_IMPRESORA)" | lp -d "$(NOMBRE_IMPRESORA)"
+
+actualizar-impresora-real:
+	sudo cancel -a "$(NOMBRE_IMPRESORA)"
+
+monitoreo-impresora-real:
+	lpstat -p
+	lpstat -o "$(EPSON_L3150)"
+	lpstat -W completed -p "$(EPSON_L3150)"
 
 help:
 	@echo ""

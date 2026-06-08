@@ -222,7 +222,7 @@ source ~/.bashrc
 ls -l /var/spool/cups-pdf/ANONYMOUS/
 traer_pdf
 ls -l $OUTPUT_DIR
-ls -l /home/esau/impresora_test_jueves/impresiones_badge
+ls -l /home/esau/OUT_DIR/impresiones_badge
 # Badge_-_NombreEmpleado.pdf (~48 KB)
 ```
 
@@ -281,11 +281,24 @@ Produce `0.pdf` vacío. Si ocurre accidentalmente:
 make cups-printer-fix
 ```
 
-**CUPS no persiste entre reinicios de WSL**
-Siempre ejecutar `make cups-start` o `make start-all` al inicio de cada sesión.
+## CUPS no persiste entre reinicios de WSL
+Siempre ejecutar 
+```bash
+make cups-start 
+ó
+make start-all
+```
+Al inicio de cada sesión.
 
-**`pycups` no persiste al recrear el contenedor**
-Siempre ejecutar `make odoo-force-deps` después de recrear el contenedor.
+## `pycups` no persiste al recrear el contenedor
+Siempre ejecutar
+```bash
+make odoo-force-deps
+```
+Después de recrear el contenedor.
+
+ 
+---
 
 ---
 
@@ -320,6 +333,65 @@ docker exec ${ODOO_CTR} curl -s http://172.30.0.1:631/printers/ | grep -o 'PDF[^
 docker network ls --filter name=impresora_net
 docker network inspect <nombre_red> | grep Gateway
 ```
+
+## Configuracion de una impresora FISICA 
+En este caso una EPSON L3150 
+Ir a https://latin.epson.com/soporte y descargar el driver , seguir los pasos para la instalacion.
+
+Ver el tipo de conexion **panel de control** → **dispositivos e impresora** → **IMPRESORA**  → **propiedades de la impresora** → **Puertos** →  se identifica si usa WSD usb o TCP/ip.
+
+Si la conexion es mediante usb , es necesario configuracion windows para quitarle al driver de windows la exclusividad del puerto USB.
+
+En **administrador de dispositivos** → **deshabilitamos la impresora**
+
+En **powershell modo administrador** 
+```bash
+winget install --interactive --exact dorssel.usbipd-win
+
+usbipd list
+
+Stop-Service -Name Spooler -Force 
+
+usbipd unbind --busid 2-4
+
+usbipd bind --busid 2-4
+
+usbipd attach --wsl --busid 2-4
+```
+
+Se instala la utilidad para gestionar el puerto usb, listamos los dispositivos usb, hacemos que windows deje de monitorear el puerto usb, desvinculamos de windows, hacemos que esté disponible y adjuntamos a wsl respectivamente.
+
+Si usa TCP/ip (conexion via wifi) no es necesaria la configuracion anterior.
+
+Ahora en wsl (ubuntu)
+
+```bash
+make dependencias-impresora-real
+make configuracion-impresora-real
+make prueba-impresora-real
+```
+
+- En la ui de ODOO ,actualizar la impresora , vincularle un server y registrarle como predeterminado.
+
+- Asimismo en ajustes → printers → reports vincular el el "modulo" a la impresora de interes(en este caso EPSON L3150)
+
+- Enviar el badge a imprimir (el mismo ejemplo que en el caso de la impresora virtual)
+
+Para ver los resultados ejecutar
+```bash
+make monitoreo-impresora-real
+```
+Se listan las impresoras, las estadisticas de la impresora de interes y sus trabajos concluidos.
+
+De nuevo en lugar de cancell jobs en la ui se usa
+
+```bash
+sudo cancel -a EPSON_L3150
+ó
+make actualizar-impresora-real
+```
+
+### Consolidación de los targets
 
 ---
 
