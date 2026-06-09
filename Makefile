@@ -90,6 +90,10 @@ ifndef OUTPUT_DIR
 	$(error Falta la variable OUTPUT_DIR en tu .env
 	)
 endif
+ifndef NOMBRE_IMPRESORA
+	$(error Falta la variable NOMBRE_IMPRESORA en tu .env
+	)
+endif
 
 # ── Objetivo principal ───────────────────────────────────────
 all: check-env cups-start odoo-dowload-mod cups-install cups-printer cups-perms odoo-deps odoo-force-deps odoo-fix-manifest odoo-fix-registry odoo-fix-views odoo-fix-data odoo-fiix-tags odoo-fix-actions odoo-update
