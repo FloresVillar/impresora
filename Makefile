@@ -40,16 +40,14 @@ fix-env:
 	cat -A .env
 	
 # docker compose up -d
-up: fix-env check-env 
+up: fix-env check-env
 	@echo ">>> Creando carpetas locales de datos con permisos correctos..."
 	mkdir -p ./odoo_test_data
 	mkdir -p $(ADDONS_DIR)
-	mkdir -p $(OUTPUT_DIR)
 	sudo chmod -R 777 ./odoo_test_data
 	sudo chmod -R 777 $(ADDONS_DIR)
-	sudo chmod -R 777 $(OUTPUT_DIR)
 	@echo ">>> Levantando contenedores en segundo plano...$(PROJECT_NAME)"
-	docker compose --env-file .env up -d 
+	docker compose --env-file .env up -d
 	@echo ">>> Contenedores iniciados. Odoo respondiendo en localhost:$(ODOO_PORT)"
 # docker compose down
 down: check-env
@@ -78,16 +76,12 @@ ifndef DB_PORT
 	$(error Falta la variable DB_PORT en tu .env
 	)
 endif
+ifndef ADDONS_DIR
+	$(error Falta la variable DB_PORT en tu .env
+	)
+endif
 ifndef ODOO_PORT
 	$(error Falta la variable ODOO_PORT en tu .env
-	)
-endif
-ifndef ADDONS_DIR
-	$(error Falta la variable ADDONS_DIR en tu .env
-	)
-endif
-ifndef OUTPUT_DIR
-	$(error Falta la variable OUTPUT_DIR en tu .env
 	)
 endif
 ifndef NOMBRE_IMPRESORA
@@ -103,7 +97,7 @@ all: check-env cups-start odoo-dowload-mod cups-install cups-printer cups-perms 
 start-all: cups-start up
 	@echo ">> sistema listo "
 
-# descargando el modulo de la OCA
+# descargando el modulo de la OCA, reemplazar git clone a futuro, de modo que se tenga un modulo (.zip)
 odoo-download-mod: check-env
 	@echo ">>> Descargando repositorio de la OCA (${OCA_BRANCH})..."
 	@mkdir -p $(ADDONS_DIR)
@@ -119,6 +113,7 @@ odoo-download-mod: check-env
 
 
 # ── 1. Instalar y levantar CUPS con filtros reales ───────────
+ 
 cups-install: check-env
 	@echo ">>> Instalando CUPS y filtros PDF..."
 	sudo apt-get update -qq
@@ -127,8 +122,8 @@ cups-install: check-env
 	sudo cupsctl --remote-any
 	sudo service cups restart
 	@echo ">>> CUPS listo."
-
 # ── 2. Registrar la impresora PDF_FILTRADO (el nombre es arbitrario)───────────────────
+ 
 cups-printer: check-env
 	@echo ">>> Creando impresora PDF_FILTRADO con PPD genérico..."
 	sudo lpadmin -p PDF_FILTRADO \
@@ -138,8 +133,8 @@ cups-printer: check-env
 	sudo lpadmin -d PDF_FILTRADO
 	@echo ">>> Impresora registrada:"
 	lpstat -p -d
-
 # ── 3. Corregir permisos del spool ───────────────────────────
+ 
 cups-perms: check-env
 	@echo ">>> Ajustando permisos del spool CUPS..."
 	@# cups-pdf corre como 'nobody' — debe ser dueño de ANONYMOUS/ para escribir archivos
@@ -149,7 +144,6 @@ cups-perms: check-env
 	sudo chmod 777 $(CUPS_SPOOL)
 	sudo chmod g+s $(CUPS_SPOOL)
 	@echo ">>> Permisos aplicados."
-
 # ── 4. Dependencias Python dentro del contenedor Odoo ────────
 odoo-deps: check-env
 	@echo ">>> Instalando libcups2 y pycups en el contenedor Odoo..."
@@ -161,8 +155,7 @@ odoo-deps: check-env
 
 # ── 5. Aplicar parches al módulo base_report_to_printer ──────
 #    Ejecuta solo si el módulo ya está copiado en ADDONS_DIR
-# ── 5a. Corregir versión en el __manifest__.py ────────────────
-# ── 5a. Corregir versión en el __manifest__.py ────────────────
+# ── 5a. Corregir versión en el __manifest__.py ──────────────── 
 odoo-fix-manifest: check-env
 	@echo ">>> Actualizando versión a 19.0.1.3.0 en __manifest__.py..."
 	@FILE=$(ADDONS_DIR)/base_report_to_printer/__manifest__.py; \
@@ -279,46 +272,8 @@ odoo-update: check-env
 	    --stop-after-init
 	docker restart $(ODOO_CTR)
 	@echo ">>> Módulo instalado y contenedor reiniciado."
-# ── Definición de la función (con etiquetas de control)
-# Configuración definitiva del driver genérico para evitar errores de filtro
-cups-printer-fix:
-	@echo ">>> Configurando impresora PDF_FILTRADO con PPD genérico..."
-	sudo lpadmin -p PDF_FILTRADO -v cups-pdf:/ -m "drv:///sample.drv/generic.ppd" -E
-	sudo lpadmin -d PDF_FILTRADO
-	sudo service cups restart
-	@echo ">>> Verificación de PPD:"
-	@lpoptions -p PDF_FILTRADO -l | head -3
-	@echo ">>> ¡Impresora lista! Prueba ahora imprimir desde Odoo."
-#---
-define BASHRC_FUNC
-# --- INICIO_TRAER_PDF ---
-traer_pdf() {
-    local SRC="/var/spool/cups-pdf/ANONYMOUS"
-    local DST="$(OUTPUT_DIR)"
-    echo "Buscando archivos nuevos en $$SRC ..."
-    sudo rsync -a --update --chown=$(USER):$(USER) "$$SRC"/*.pdf "$$DST"/ 2>/dev/null && \
-        echo "¡Operación completada! PDFs en $$DST" || \
-        echo "No hay archivos PDF nuevos en $$SRC"
-}
-# --- FIN_TRAER_PDF ---
-endef
-export BASHRC_FUNC
+	
 
-# ── . Crear carpeta de salida y función traer_pdf ───────────
-traer-pdf: $(OUTPUT_DIR)
-	@echo ">>> Carpeta de salida lista: $(OUTPUT_DIR)"
-
-$(OUTPUT_DIR):
-	mkdir -p $(OUTPUT_DIR)
-
-# ── Inyectar/Actualizar función en ~/.bashrc (El motor de reemplazo) ──
-bashrc-fn: check-env
-	@echo ">>> Actualizando traer_pdf en ~/.bashrc..."
-	@# 1. Si el bloque existe, lo borramos usando las etiquetas como anclas
-	@sed -i '/# --- INICIO_TRAER_PDF ---/,/# --- FIN_TRAER_PDF ---/d' ~/.bashrc
-	@# 2. Añadimos el bloque fresco al final
-	@printf '%s\n' "$$BASHRC_FUNC" >> ~/.bashrc
-	@echo ">>> ¡Actualizado correctamente! Recarga con: source ~/.bashrc"
 # ── Utilidades ───────────────────────────────────────────────
 status: check-env
 	@echo "=== Estado de CUPS ==="
@@ -342,8 +297,7 @@ clean: check-env
 	@echo ">>> Limpieza completada."
 
 # -----------------IMPRESORA REAL---------------------
-#----------------------------------------------------- 
-
+# ----------------------------------------------------- 
 dependencias-impresora-real:
 	@echo ">>> Verificando dependencias..."
 	@# Lista de paquetes necesarios
@@ -358,12 +312,60 @@ dependencias-impresora-real:
 	done
 	@echo ">>> Iniciando servicios..." 
 	sudo service cups restart
+#---
+preparar-sistema:
+	@echo ">>> Verificando dependencias..."
+	sudo apt-get update -qq
+	sudo apt-get install -y cups printer-driver-escpr usbutils
+	sudo chmod 0755 /usr/lib/cups/backend/usb
+	sudo service cups restart
+	@echo ">>> Sistema listo (sin udev, no es necesario en WSL2)."
 
+# ------luego de attach en powershell-----------------------------------------
+desbloquear-usb:
+	@echo ">>> 1. Limpiando cola de impresión por seguridad..."
+	@sudo cancel -a
+	@echo ">>> Detectando impresora en bus USB..."
+	@# Buscamos la línea de Epson y extraemos el bus y el dispositivo
+	@BUS=$$(lsusb | grep "04b8:1143" | awk '{print $$2}'); \
+	DEV=$$(lsusb | grep "04b8:1143" | awk '{print $$4}' | tr -d ':'); \
+	BUS_PATH="/dev/bus/usb/$$BUS/$$DEV"; \
+	if [ -z "$$BUS" ] || [ -z "$$DEV" ]; then \
+		echo "[ERROR] Impresora no detectada. ¿Hiciste el 'usbipd attach' en Windows?"; exit 1; \
+	fi; \
+	echo ">>> Dispositivo detectado en: $$BUS_PATH"; \
+	sudo chmod 666 $$BUS_PATH
+#.---
+configuracion-impresora-real: 
+	@echo ">>> Detectando driver y dispositivo..."
+	# Buscamos el driver exacto para L3150 automáticamente
+	@DRIVER=$$(lpinfo -m | grep -i "L3150" | grep "escpr" | head -n 1 | cut -d' ' -f1); \
+	URI=$$(sudo /usr/lib/cups/backend/usb | grep 'usb://EPSON' | head -n 1 | awk '{print $$2}'); \
+	\
+	if [ -z "$$DRIVER" ]; then echo "[ERROR] Driver no encontrado."; exit 1; fi; \
+	if [ -z "$$URI" ]; then echo "[ERROR] Impresora no detectada."; exit 1; fi; \
+	\
+	echo ">>> Usando driver: $$DRIVER"; \
+	-sudo lpadmin -x "$(NOMBRE_IMPRESORA)" 2>/dev/null; \
+	sudo lpadmin -p "$(NOMBRE_IMPRESORA)" -v "$$URI" -m "$$DRIVER" -E; \
+	sudo lpadmin -d "$(NOMBRE_IMPRESORA)"; \
+	echo ">>> ¡Configuración completada con el driver dinámico!"
+#---
+prueba-impresora-real: 
+	echo "Prueba de impresion $(NOMBRE_IMPRESORA)" | lp -d "$(NOMBRE_IMPRESORA)"
+#----
+actualizar-limpiar-impresora-real:
+	sudo cancel -a "$(NOMBRE_IMPRESORA)"
+#---
+monitoreo-impresora-real:
+	lpstat -p
+	lpstat -o "$(NOMBRE_IMPRESORA)"
+	lpstat -W completed -p "$(NOMBRE_IMPRESORA)"
 # Busca líneas que empiecen por 'direct usb://' o 'network ipp://'
 # El 'awk' extrae el segundo campo sin importar si hay uno o diez espacios
 DEVICE_URI := $(shell lpinfo -v | grep -E '^(direct usb|network ipp)://' | head -n 1 | awk '{print $$2}')
 
-configuracion-impresora-real: 
+configuracion-impresora-real-2: 
 	@echo "detectando impresoras disponibles"
 	if [ -z "$(DEVICE_URI)" ]; then \
 		echo "Error: no hay impresoras conectadas ni usb" \
@@ -378,17 +380,11 @@ configuracion-impresora-real:
 	sudo lpadmin -d "$(NOMBRE_IMPRESORA)"
 	@echo "--configuracion realizada" 
 	lpstat -p -d
+# ── 1. PREPARACIÓN ÚNICA (WSL2 optimizado) ──
 
-prueba-impresora-real: 
-	echo "Prueba de impresion $(NOMBRE_IMPRESORA)" | lp -d "$(NOMBRE_IMPRESORA)"
+# ── 2. CONFIGURACIÓN DE IMPRESORA (Busca y registra) ──
+# Este target usa la preparación previa y se enfoca solo en detectar y registrar.
 
-actualizar-limpiar-impresora-real:
-	sudo cancel -a "$(NOMBRE_IMPRESORA)"
-
-monitoreo-impresora-real:
-	lpstat -p
-	lpstat -o "$(NOMBRE_IMPRESORA)"
-	lpstat -W completed -p "$(NOMBRE_IMPRESORA)"
 
 help:
 	@echo ""

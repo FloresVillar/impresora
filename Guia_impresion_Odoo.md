@@ -99,27 +99,7 @@ echo ".env" >> .gitignore
 
 ---
 
-### 0.5 — Configuración global de CUPS-PDF  Solo una vez por máquina 
-**Solo para el caso de impresora virtual**
-.La impresora fisica no usa **cups-pdf** , usa su propio driver (gutenprint,generico,etc)
 
-> Por defecto `cups-pdf` escribe en `${HOME}/PDF` → bajo WSL es `/root/PDF/`, inaccesible. Este paso lo redirige al spool correcto.
-
-```bash
-sudo nano /etc/cups/cups-pdf.conf
-```
-
-Busca la directiva `Out` y déjala así:
-
-```
-Out /var/spool/cups-pdf/ANONYMOUS
-```
-
-Guarda (`Ctrl+O`, `Enter`, `Ctrl+X`) y reinicia:
-
-```bash
-sudo service cups restart
-```
 
 ---
 
@@ -145,42 +125,17 @@ make up
 make odoo-download-mod
 ```
 
----
-
-### 4 — Instalar CUPS con filtros reales
-**Solo para el caso de impresora virtual**
-> La versión estándar de `cups-pdf` no incluye los filtros de conversión (Ghostscript) necesarios para procesar el formato que envía Odoo. Sin `cups-filters` el PDF sale vacío . Sin `cups-filters` el PDF sale vacío (`0.pdf` de ~2KB).
+### 4 - instalar filtros reales
 
 ```bash
 make cups-install
 ```
-
----
-
-### 5 — Registrar la impresora virtual `PDF_FILTRADO`
-**Solo para el caso de impresora virtual**
-
-```bash
-make cups-printer
-```
-
-Verificación:
-```bash
-lpstat -p -d
-# printer PDF_FILTRADO is idle ... / system default destination: PDF_FILTRADO
-```
-
----
-
-### 6 — Corregir permisos del spool
-**Solo para el caso de impresora virtual**
-> La carpeta donde CUPS escribe los PDFs generados (`/var/spool/cups-pdf/ANONYMOUS/`) pertenece al usuario `lp`. Sin los permisos correctos, el backend no puede escribir el archivo resultante
-
+ 
+### 5 -- Permisos
 ```bash
 make cups-perms
 ```
-
----
+--
 
 ### 7 — Instalar dependencias Python en el contenedor
 >  El módulo `base_report_to_printer` usa `pycups` para comunicarse con CUPS. Esta librería no viene en la imagen Docker de Odoo y requiere cabeceras de desarrollo para compilarse
@@ -191,7 +146,7 @@ make odoo-deps
 > **Nota sobre `--break-system-packages`:** En Python 3.12 (PEP 668), pip no permite instalar paquetes globalmente sin esta bandera cuando el entorno está marcado como "externally managed". Es seguro usarla en este contenedor de desarrollo.
 ---
 
-### 8 — Aplicar parches de compatibilidad con Odoo 19
+### 8 — Aplicar parches de compatibilidad con Odoo 19 (optimizar por recomendacion del lider de equipo)
 El módulo base_report_to_printer fue diseñado para Odoo 16/17. Requiere correcciones para funcionar en Odoo 19
 ```bash
 make odoo-fix-manifest   # versión 19.0.1.3.0
@@ -217,10 +172,9 @@ make odoo-update
 ```
 
 ### 10 - Configuracion de una impresora FISICA 
-Siguiendo el flujo anterior o si es solo una nueva sesion
-```bash
-make start-all
-```
+Siguiendo el flujo anterior o si es solo una nueva sesion **make start-all**
+
+
 
 Luego  de levantado los servicios , se procede a la "exposicion de servicio mediante red" o "redireccion de dispositivo a nivel de bus" de la impresora, este caso una EPSON L3150  (totalmente arbitrario)
 
@@ -247,6 +201,12 @@ usbipd bind --busid 2-4
 
 usbipd attach --wsl --busid 2-4
 ```
+En wsl  co
+```bash
+ sudo service cups restart && sleep 2 && lpinfo -v
+```
+Comprobar en el terminal  **lsusb** si la impesora no aparece ,en powershell modo administrador , adjuntar nuevamente
+mediante **usbipd attach --wsl --busid 2-4**
 
 Se instala la utilidad para gestionar el puerto usb, listamos los dispositivos usb, hacemos que windows deje de monitorear el puerto usb, desvinculamos de windows, hacemos que esté disponible y adjuntamos a wsl respectivamente.
 
