@@ -112,7 +112,9 @@ make cups-start
 ---
 
 ### 2 — Levantar los contenedores
+Si se ejecuta el proyecto por primera vez o si es que se hizo una migracion de las versiones de OCA y se tuvo que borrar las bases de datos(make borrar-db), se busca reconstruir los contenedores.
 
+Si se esta en desarrollo y usando un solo host, es recomendable apagar los otros contenedores, en este caso **docker stop odoo19-server-test odoo19-db-test odoo19-server-dev odoo19-db-dev**
 ```bash
 make up
 ```
@@ -133,41 +135,25 @@ make cups-install
  
 ### 5 -- Permisos
 ```bash
-make cups-perms
+make cups-perms 
 ```
 --
 
 ### 7 — Instalar dependencias Python en el contenedor
 >  El módulo `base_report_to_printer` usa `pycups` para comunicarse con CUPS. Esta librería no viene en la imagen Docker de Odoo y requiere cabeceras de desarrollo para compilarse
 ```bash
-make odoo-deps
+make odoo-force-deps
 ```
 
 > **Nota sobre `--break-system-packages`:** En Python 3.12 (PEP 668), pip no permite instalar paquetes globalmente sin esta bandera cuando el entorno está marcado como "externally managed". Es seguro usarla en este contenedor de desarrollo.
 ---
 
-### 8 — Aplicar parches de compatibilidad con Odoo 19 (optimizar por recomendacion del lider de equipo)
-El módulo base_report_to_printer fue diseñado para Odoo 16/17. Requiere correcciones para funcionar en Odoo 19
-```bash
-make odoo-fix-manifest   # versión 19.0.1.3.0
-make odoo-fix-registry   # models/ir_actions_report.py importación de registry movida en Odoo 19
-make odoo-fix-views      # res_users.xml incompatible <group name="preferences"> a XPath sobre //notebook
-make odoo-fix-data       # ir.property eliminado en Odoo 19
-make odoo-fix-tags       # <tree> → <list>
-make odoo-fix-actions    # view_mode="tree" → view_mode="list"
-```
-
-o el pipeline para fix
-```bash
-make odoo-patch-all
-```
 
 ---
 
 ### 9 — Instalar el módulo en Odoo
 
 ```bash
-make odoo-force-deps   # asegura pycups antes de instalar
 make odoo-update
 ```
 
@@ -187,7 +173,7 @@ Si la conexion es mediante usb , es necesario configuracion windows para quitarl
 En **administrador de dispositivos** → **deshabilitamos la impresora**
 
 En **powershell modo administrador** 
-La instalacion se puede realizar una sola vez, pero la detencion del servicio en windows se realiza cada inicio de sesion.Es posible que se requiera ejecutar el forzado varias veces, windows tiende a recuperar el control si el usb se desconecta.
+La instalacion se puede realizar una sola vez, pero la detencion del servicio en windows se realiza cada inicio de sesion.Es posible que se requiera ejecutar el forzado varias veces(cada inicio de sesion), windows tiende a recuperar el control si el usb se desconecta.
 ```bash
 winget install --interactive --exact dorssel.usbipd-win
 
@@ -201,10 +187,7 @@ usbipd bind --busid 2-4
 
 usbipd attach --wsl --busid 2-4
 ```
-En wsl  co
-```bash
- sudo service cups restart && sleep 2 && lpinfo -v
-```
+ 
 Comprobar en el terminal  **lsusb** si la impesora no aparece ,en powershell modo administrador , adjuntar nuevamente
 mediante **usbipd attach --wsl --busid 2-4**
 
@@ -215,9 +198,10 @@ Si usa TCP/ip (conexion via wifi) no es necesaria la configuracion anterior.
 Ahora en wsl (ubuntu)
 
 ```bash
-make dependencias-impresora-real
-make configuracion-impresora-real
-make prueba-impresora-real
+make preparar-impresora
+make desbloquear-usb
+make registrar-impresora
+make prueba-impresora
 ```
 
 
@@ -229,7 +213,7 @@ Luego ir a `localhost:ODOO_PORT` e ingresar credenciales de `config/odoo.conf`.
 **11a — Activar modo desarrollador**
 `Ajustes → Activar el modo desarrollador`
 
-**11b — Instalar el módulo desde Apps**
+**11b — Instalar el módulo desde Apps** (make odoo-update realiza esto)
 `Apps → Buscar "base_report_to_printer" → Instalar`
 
 **11c — Registrar el servidor CUPS (impresora virtual)**
@@ -243,7 +227,6 @@ Luego ir a `localhost:ODOO_PORT` e ingresar credenciales de `config/odoo.conf`.
 
 > `172.30.0.1` es la gateway fija definida en `docker-compose.yml`. Verificar con:
 > ```bash
-> docker network ls --filter name=impresora_net
 > docker network inspect <nombre_red> | grep Gateway
 > ```
 el nombre de la red esta definido en el docker-compose.yml
@@ -251,30 +234,17 @@ el nombre de la red esta definido en el docker-compose.yml
 **11d — Registrar la impresora : para el caso de la impresora fisica solo Update**
 
 
-`(fisica)Ajustes → Técnico → Impresión → Impresoras → Update Printers from CUPS`
-
-
-`(virtual)Ajustes → Técnico → Impresión → Impresoras → Nueva`
- 
-| Campo | Valor |
-|-------|-------|
-| Display name | PDF_FILTRADO |
-| System Name (cups-printer: sudo lpadmin -p PDF_FILTRADO ) | PDF_FILTRADO |
-| Servidor | CUPS Local |
+`(fisica)Ajustes → Técnico → Impresión → Impresoras → Update Printers from CUPS` (make resgistrar-impresora)
 
 Clic en **Actualizar impresoras** → debe quedar en verde.
-
-**11e — Impresora predeterminada por usuario** *(opcional)*
-`Ajustes → Usuarios → [usuario] → pestaña "Impresión"`
 
 **11f — Activar en modulo Employee** 
 `Apps → Employees (ACTIVAR)`
 
 **11g — Configurar reporte de insignia**  
 `Ajustes → Printing → Reports → Print Badge`:
-- Default Behaviour: create , 
-    - name: imprimir 
-    - type: `Send to Printer`
+- Default Behaviour: 
+    -  `Send to Printer`
 - Default Printer(nombre de la impresora): `IMPRESORA`
 
 ---
@@ -282,7 +252,7 @@ Clic en **Actualizar impresoras** → debe quedar en verde.
 
 Para ver los resultados ejecutar
 ```bash
-make monitoreo-impresora-real
+make monitoreo-impresora
 ```
 Se listan las impresoras, las estadisticas de la impresora de interes y sus trabajos concluidos.
 
@@ -291,8 +261,6 @@ En lugar de cancell jobs en la ui se usa
 
 ```bash
 sudo cancel -a EPSON_L3150
-ó
-make actualizar-limpiar-impresora-real
 ```
 Para devolver el control a windows y probar otro tipo de comunicacion, en poweshell modo administrador
 ```bash
@@ -303,33 +271,6 @@ Start-Service -Name Spooler
 ---
 
 
-
-### 12 — Preparar carpeta de salida
-**Solo para el caso de la impresora virtual**
-```bash
-make traer-pdf      # crea ~/carpeta de proyecto/impresiones_badge
-make bashrc-fn      # agrega la función traer_pdf al .bashrc
-source ~/.bashrc
-```
-La función `traer_pdf` copia los PDFs del spool de CUPS (que pertenece a root/lp) a tu carpeta de trabajo con permisos de tu usuario.
-
-Flujo de prueba
-
-1. `Empleados → [empleado] → Imprimir insignia`
-2. En WSL2:
-```bash
-ls -l /var/spool/cups-pdf/ANONYMOUS/
-traer_pdf
-ls -l $OUTPUT_DIR
-ls -l /home/usuario/OUT_DIR/impresiones_badge
-# Badge_-_NombreEmpleado.pdf (~48 KB)
-```
-
-Acceso desde Windows:
-```
-\\wsl.localhost\Ubuntu\home\<usuario>\<proyecto>\impresiones_badge
-```
-
 ---
 
  
@@ -338,13 +279,14 @@ Acceso desde Windows:
  
 ```bash
 make start-all   # cups-start + up
+make desbloquear-usb
 ```
 
 Listo. Odoo disponible en `localhost:ODOO_PORT`.
 
 ---
  
-##  CUANDO SE RECREA EL CONTENEDOR (impresora virtual)
+##  CUANDO SE RECREA EL CONTENEDOR (a discreción del administrador/caso impresora virtual)
 ### (después de make restart-net, make down && make up, o Docker Desktop reiniciado) 
 
 > El contenedor pierde `pycups` al ser recreado porque es una instalación dentro de la imagen en tiempo de ejecución, no persistida en volúmenes.
@@ -363,7 +305,7 @@ make cups-perms
 
 ---
 
-## Limitaciones conocidas
+## Limitaciones conocidas (caso virtual)
 
 **"Cancel All Jobs" da error `Unauthorized`**
 CUPS rechaza operaciones IPP administrativas desde Docker sin autenticación. Usar desde terminal:
@@ -426,7 +368,7 @@ make monitoreo-impresora-real
 ```
 
 ### Impresora virtual (PDF_FILTRADO)
-
+Sustancialmente mas complejo
 ```bash
 # Ver si Odoo envía el trabajo
 docker logs -f ${ODOO_CTR}

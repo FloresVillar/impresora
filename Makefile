@@ -10,7 +10,7 @@ ENV_FILE=.env
 USER        ?= $(shell whoami)
 CUPS_SPOOL  := /var/spool/cups-pdf/ANONYMOUS
 OCA_REPO    := https://github.com/OCA/report-print-send.git
-OCA_BRANCH  := 17.0
+OCA_BRANCH  := 19.0
 
 .PHONY: cups-start fix-env cups-printer-fix up down restart-net all all-start odoo-download-mod check-env cups-install cups-printer cups-perms \
         odoo-module-install odoo-fix-manifest odoo-fix-registry odoo-fix-views odoo-fix-tags odoo-fix-actions odoo-patch-all\
@@ -62,6 +62,15 @@ restart-net: down up
 	@echo ">>> Verificando gateway de la red..."
 	@NET=$$(docker network ls --filter name=impresora_net --format '{{.Name}}' | head -1); 	docker network inspect $$NET | grep Gateway
 
+# Detiene contenedores y BORRA los volúmenes (Base de datos limpia)RECURSO EXTREMO
+borrar-db: check-env
+	@echo ">>> Deteniendo contenedores de este proyecto..."
+	docker compose --env-file .env down
+	@echo ">>> Eliminando carpetas físicas de la base de datos y Odoo..."
+	sudo rm -rf ./postgres19_test_data/
+	sudo rm -rf ./odoo_test_data/
+	@echo ">>> ¡Todo limpio de verdad! Listo para un inicio virgen."
+
 #validando variables de existan
 check-env:
 ifndef ODOO_DB
@@ -98,18 +107,11 @@ start-all: cups-start up
 	@echo ">> sistema listo "
 
 # descargando el modulo de la OCA, reemplazar git clone a futuro, de modo que se tenga un modulo (.zip)
-odoo-download-mod: check-env
-	@echo ">>> Descargando repositorio de la OCA (${OCA_BRANCH})..."
-	@mkdir -p $(ADDONS_DIR)
-	@rm -rf $(ADDONS_DIR)/base_report_to_printer
+odoo-download-modulo: check-env
+	@echo ">>> Descargando repositorio completo de la OCA..."
 	@rm -rf $(ADDONS_DIR)/report-print-send
 	git clone $(OCA_REPO) -b $(OCA_BRANCH) $(ADDONS_DIR)/report-print-send
-	@echo ">>> Extrayendo base_report_to_printer..."
-	mv $(ADDONS_DIR)/report-print-send/base_report_to_printer $(ADDONS_DIR)/
-	@echo ">>> Limpiando archivos temporales..."
-	rm -rf $(ADDONS_DIR)/report-print-send
-	@echo ">>> Módulo descargado con éxito en $(ADDONS_DIR)/base_report_to_printer"
-
+	@echo ">>> ¡Repositorio listo y actualizado!"
 
 
 # ── 1. Instalar y levantar CUPS con filtros reales ───────────
@@ -122,18 +124,8 @@ cups-install: check-env
 	sudo cupsctl --remote-any
 	sudo service cups restart
 	@echo ">>> CUPS listo."
-# ── 2. Registrar la impresora PDF_FILTRADO (el nombre es arbitrario)───────────────────
- 
-cups-printer: check-env
-	@echo ">>> Creando impresora PDF_FILTRADO con PPD genérico..."
-	sudo lpadmin -p PDF_FILTRADO \
-	             -v cups-pdf:/ \
-	             -m "drv:///sample.drv/generic.ppd" \
-	             -E
-	sudo lpadmin -d PDF_FILTRADO
-	@echo ">>> Impresora registrada:"
-	lpstat -p -d
-# ── 3. Corregir permisos del spool ───────────────────────────
+
+# ── 3. Corregir permisos del spool ..PARA LA IMPRESORA VIRTUAL───────────────────────────
  
 cups-perms: check-env
 	@echo ">>> Ajustando permisos del spool CUPS..."
@@ -149,131 +141,32 @@ odoo-deps: check-env
 	@echo ">>> Instalando libcups2 y pycups en el contenedor Odoo..."
 	docker exec -u root $(ODOO_CTR) apt-get update -qq
 	docker exec -u root $(ODOO_CTR) apt-get install -y libcups2-dev python3-dev gcc
-	docker exec -u root $(ODOO_CTR) pip install pycups --break-system-packages
+	docker exec -u root $(ODOO_CTR) pip3 install pycups --break-system-packages
 	docker restart $(ODOO_CTR)
 	@echo ">>> Dependencias instaladas y contenedor reiniciado."
 
-# ── 5. Aplicar parches al módulo base_report_to_printer ──────
-#    Ejecuta solo si el módulo ya está copiado en ADDONS_DIR
-# ── 5a. Corregir versión en el __manifest__.py ──────────────── 
-odoo-fix-manifest: check-env
-	@echo ">>> Actualizando versión a 19.0.1.3.0 en __manifest__.py..."
-	@FILE=$(ADDONS_DIR)/base_report_to_printer/__manifest__.py; \
-	if [ -f "$$FILE" ]; then \
-		sed -i 's/"version":.*/"version": "19.0.1.3.0",/' "$$FILE"; \
-		sed -i "s/'version':.*/'version': '19.0.1.3.0',/" "$$FILE"; \
-		echo ">>> Versión actualizada con éxito."; \
-	else \
-		echo ">>> [ERROR] No se encontró el archivo __manifest__.py en $$FILE"; \
-		exit 1; \
-	fi
-# --- 5b--
-odoo-fix-registry: check-env
-	@echo ">>> Parcheando importación de Registry en ir_actions_report.py..."
-	@FILE=$(ADDONS_DIR)/base_report_to_printer/models/ir_actions_report.py; \
-	sed -i 's/^from odoo import .*/from odoo import _, api, exceptions, fields, models/' "$$FILE"; \
-	grep -q "from odoo.modules.registry import Registry as registry" "$$FILE" || \
-	    sed -i '/^from odoo import/a from odoo.modules.registry import Registry as registry' "$$FILE"
-	@echo ">>> Parche de registry aplicado."
-# ---5c--
-odoo-fix-views: check-env
-	@echo ">>> Corrigiendo res_users.xml (compatibilidad Odoo 19)..."
-	@mkdir -p $(ADDONS_DIR)/base_report_to_printer/views
-	@echo '<?xml version="1.0" ?>' > $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '<odoo>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '    <record model="ir.ui.view" id="view_users_form">' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '        <field name="name">res.users.form (in base_report_to_printer)</field>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '        <field name="model">res.users</field>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '        <field name="inherit_id" ref="base.view_users_form" />' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '        <field name="arch" type="xml">' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '            <xpath expr="//notebook" position="inside">' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '                <page string="Impresión" name="printing_page">' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '                    <group string="Configuración de Impresión Continua" name="printing">' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '                        <field name="printing_action" />' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo "                        <field name=\"printing_printer_id\" options=\"{'no_create': True}\" />" >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '                    </group>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '                </page>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '            </xpath>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '        </field>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '    </record>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '    <record model="ir.ui.view" id="view_users_form_simple_modif">' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '        <field name="name">res.users.form.simple (in base_report_to_printer)</field>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '        <field name="model">res.users</field>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '        <field name="inherit_id" ref="base.view_users_form_simple_modif" />' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '        <field name="arch" type="xml">' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '            <xpath expr="//form/sheet" position="inside">' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '                <group string="Impresión" name="printing">' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '                    <field name="printing_action" readonly="0" />' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo "                    <field name=\"printing_printer_id\" readonly=\"0\" options=\"{'no_create': True}\" />" >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '                </group>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '            </xpath>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '        </field>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '    </record>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo '</odoo>' >> $(ADDONS_DIR)/base_report_to_printer/views/res_users.xml
-	@echo ">>> res_users.xml reemplazado."
-
-# ---5d--
-odoo-fix-data: check-env
-	@echo ">>> Desactivando datos incompatibles de ir.property en __manifest__.py..."
-	@FILE=$(ADDONS_DIR)/base_report_to_printer/__manifest__.py; \
-	if [ -f "$$FILE" ]; then \
-		sed -i "s/'data\/printing_data.xml',//" "$$FILE"; \
-		sed -i 's/"data\/printing_data.xml",//' "$$FILE"; \
-		echo ">>> Datos antiguos desactivados con éxito."; \
-	else \
-		echo ">>> [ERROR] No se encontró el archivo __manifest__.py"; \
-		exit 1; \
-	fi
-# ---5e--
-odoo-fix-tags: check-env
-	@echo ">>> Reemplazando de manera GLOBAL todas las vistas <tree> obsoletas por <list>..."
-	@DIR=$(ADDONS_DIR)/base_report_to_printer; \
-	if [ -d "$$DIR" ]; then \
-		find "$$DIR" -type f -name "*.xml" -exec sed -i 's/<tree/<list/g' {} +; \
-		find "$$DIR" -type f -name "*.xml" -exec sed -i 's/<\/tree/<\/list/g' {} +; \
-		echo ">>> Todo el código XML del módulo ha sido actualizado a <list>."; \
-	else \
-		echo ">>> [ERROR] No se encontró la carpeta del módulo en $$DIR"; \
-		exit 1; \
-	fi
-# ---5f--
-odoo-fix-actions: check-env
-	@echo ">>> Saneando view_mode de 'tree' a 'list' en XML y Python..."
-	@DIR=$(ADDONS_DIR)/base_report_to_printer; \
-	if [ -d "$$DIR" ]; then \
-		find "$$DIR" -type f -name "*.xml" -exec sed -i 's/view_mode">tree/view_mode">list/g' {} +; \
-		find "$$DIR" -type f -name "*.xml" -exec sed -i 's/view_mode="tree/view_mode="list/g' {} +; \
-		find "$$DIR" -type f -name "*.py" -exec sed -i "s/'view_mode': 'tree/'view_mode': 'list/g" {} +; \
-		find "$$DIR" -type f -name "*.py" -exec sed -i 's/"view_mode": "tree/"view_mode": "list/g' {} +; \
-		find "$$DIR" -type f -name "*.py" -exec sed -i "s/'view_mode': 'tree,/'view_mode': 'list,/g" {} +; \
-		echo ">>> Todo el código corregido con éxito."; \
-	else \
-		echo ">>> [ERROR] No se encontró la carpeta del módulo"; \
-		exit 1; \
-	fi
-# Agrupa todos los parches de Odoo 19
-odoo-patch-all: odoo-fix-manifest odoo-fix-registry odoo-fix-views odoo-fix-data odoo-fix-tags odoo-fix-actions
-	@echo ">>> Todos los parches de Odoo 19 han sido aplicados con éxito."
 # ── 4b. Rescate: Instalación forzada de dependencias (para evitar errores de upgrade)
-odoo-force-deps: check-env
-	@echo ">>> Instalando dependencias críticas (libcups2-dev, gcc, pycups) en el contenedor..."
-	docker exec -u root $(ODOO_CTR) apt-get update -qq
-	docker exec -u root $(ODOO_CTR) apt-get install -y libcups2-dev gcc python3-dev
-	docker exec -u root $(ODOO_CTR) pip3 install pycups --break-system-packages
-	docker restart $(ODOO_CTR)
-	@echo ">>> Dependencias instaladas. Intenta el upgrade nuevamente."
- 
+odoo-force-deps: check-env odoo-deps
+
 # ── 6. Actualizar/instalar el módulo en Odoo ─────────────────
 odoo-update: check-env
 	@echo ">>> Instalando base_report_to_printer en la base $(ODOO_DB)..."
 	docker exec $(ODOO_CTR) odoo \
 	    -d $(ODOO_DB) \
-	    -i base_report_to_printer \
+	    -i base_report_to_printer,base_report_to_printer_cups,base_report_to_label_printer,base_report_to_printer_qztray,base_report_to_printer_websocket \
 	    --stop-after-init
 	docker restart $(ODOO_CTR)
 	@echo ">>> Módulo instalado y contenedor reiniciado."
 	
-
+# ── 6. Actualizar de verdad (Upgrade) el módulo en Odoo ───────
+odoo-upgrade: check-env
+	@echo ">>> Forzando la ACTUALIZACIÓN (Upgrade) del módulo en la base $(ODOO_DB)..."
+	docker exec $(ODOO_CTR) odoo \
+		-d $(ODOO_DB) \
+		-u base_report_to_printer \
+		--stop-after-init
+	docker restart $(ODOO_CTR)
+	@echo ">>> Estructura de base de datos actualizada y contenedor reiniciado."
 # ── Utilidades ───────────────────────────────────────────────
 status: check-env
 	@echo "=== Estado de CUPS ==="
@@ -297,34 +190,20 @@ clean: check-env
 	@echo ">>> Limpieza completada."
 
 # -----------------IMPRESORA REAL---------------------
-# ----------------------------------------------------- 
-dependencias-impresora-real:
-	@echo ">>> Verificando dependencias..."
-	@# Lista de paquetes necesarios
-	@PACKAGES="usbutils cups cups-ipp-utils printer-driver-gutenprint printer-driver-all"; \
-	for pkg in $$PACKAGES; do \
-		if dpkg -s $$pkg >/dev/null 2>&1; then \
-			echo "  [OK] $$pkg ya está instalado"; \
-		else \
-			echo "  [!] Instalando $$pkg..."; \
-			sudo apt update && sudo apt install -y $$pkg; \
-		fi \
-	done
-	@echo ">>> Iniciando servicios..." 
-	sudo service cups restart
-#---
-preparar-sistema:
-	@echo ">>> Verificando dependencias..."
+# Instala CUPS, utilitarios de comunicación y drivers específicos para la EPSON L3150
+preparar-impresora: check-env
+	@echo ">>> Actualizando el índice de paquetes..."
 	sudo apt-get update -qq
-	sudo apt-get install -y cups printer-driver-escpr usbutils
+	@echo ">>> Instalando herramientas USB, CUPS y drivers (Epson/Gutenprint)..."
+	sudo apt-get install -y usbutils cups cups-ipp-utils printer-driver-escpr printer-driver-gutenprint
+	@echo ">>> Corrigiendo permisos del backend USB de CUPS para detección en WSL2..."
 	sudo chmod 0755 /usr/lib/cups/backend/usb
+	@echo ">>> Reiniciando el servicio de CUPS..."
 	sudo service cups restart
-	@echo ">>> Sistema listo (sin udev, no es necesario en WSL2)."
-
+	@echo ">>> ¡Sistema listo! CUPS ya puede buscar e instalar la impresora física."
 # ------luego de attach en powershell-----------------------------------------
 desbloquear-usb:
-	@echo ">>> 1. Limpiando cola de impresión por seguridad..."
-	@sudo cancel -a
+	@echo ">>> 1. Limpiando cola de impresión por seguridad..." 
 	@echo ">>> Detectando impresora en bus USB..."
 	@# Buscamos la línea de Epson y extraemos el bus y el dispositivo
 	@BUS=$$(lsusb | grep "04b8:1143" | awk '{print $$2}'); \
@@ -336,9 +215,9 @@ desbloquear-usb:
 	echo ">>> Dispositivo detectado en: $$BUS_PATH"; \
 	sudo chmod 666 $$BUS_PATH
 #.---
-configuracion-impresora-real: 
+registrar-impresora: 
 	@echo ">>> Detectando driver y dispositivo..."
-	# Buscamos el driver exacto para L3150 automáticamente
+	@echo "# Buscamos el driver exacto para L3150 automáticamente"
 	@DRIVER=$$(lpinfo -m | grep -i "L3150" | grep "escpr" | head -n 1 | cut -d' ' -f1); \
 	URI=$$(sudo /usr/lib/cups/backend/usb | grep 'usb://EPSON' | head -n 1 | awk '{print $$2}'); \
 	\
@@ -350,14 +229,14 @@ configuracion-impresora-real:
 	sudo lpadmin -p "$(NOMBRE_IMPRESORA)" -v "$$URI" -m "$$DRIVER" -E; \
 	sudo lpadmin -d "$(NOMBRE_IMPRESORA)"; \
 	echo ">>> ¡Configuración completada con el driver dinámico!"
-#---
-prueba-impresora-real: 
+#-----------------
+prueba-impresora: 
 	echo "Prueba de impresion $(NOMBRE_IMPRESORA)" | lp -d "$(NOMBRE_IMPRESORA)"
 #----
 actualizar-limpiar-impresora-real:
 	sudo cancel -a "$(NOMBRE_IMPRESORA)"
 #---
-monitoreo-impresora-real:
+monitoreo-impresora:
 	lpstat -p
 	lpstat -o "$(NOMBRE_IMPRESORA)"
 	lpstat -W completed -p "$(NOMBRE_IMPRESORA)"
