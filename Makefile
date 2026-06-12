@@ -12,11 +12,24 @@ CUPS_SPOOL  := /var/spool/cups-pdf/ANONYMOUS
 OCA_REPO    := https://github.com/OCA/report-print-send.git
 OCA_BRANCH  := 19.0
 
-.PHONY: cups-start fix-env cups-printer-fix up down restart-net all all-start odoo-download-mod check-env cups-install cups-printer cups-perms \
-        odoo-module-install odoo-fix-manifest odoo-fix-registry odoo-fix-views odoo-fix-tags odoo-fix-actions odoo-patch-all\
-        odoo-deps odoo-update odoo-force-deps traer-pdf bashrc-fn \
-        status clean help dependencias-impresora-real configuracion-impresora-real prueba-impresora-real actualizar-impresora-real monitoreo-impresora-real
-# 
+.PHONY: cups-install cups-start fix-env check-env up down restart-net borrar-db \
+        setup start-all odoo-download-modulo spool-perms \
+        odoo-deps odoo-force-deps odoo-update odoo-upgrade \
+        status clean preparar-impresora desbloquear-usb registrar-impresora \
+        prueba-impresora actualizar-limpiar-impresora monitoreo-impresora \
+        limpiar-impresora help
+ 
+# ── 1. Instalar y levantar CUPS con filtros reales ───────────
+ 
+cups-install: check-env
+	@echo ">>> Instalando CUPS y filtros PDF..."
+	sudo apt-get update -qq
+	sudo apt-get install -y cups cups-filters printer-driver-cups-pdf cups-pdf
+	sudo service cups start
+	sudo cupsctl --remote-any
+	sudo service cups restart
+	@echo ">>> CUPS listo."
+# ---- 2. iniciar cups----
 cups-start:
 	@echo "--- Iniciando servicio CUPS ---"
 	@if sudo service cups status | grep -q "is running"; then \
@@ -24,21 +37,51 @@ cups-start:
 	else \
 		sudo service cups start && echo "CUPS iniciado correctamente."; \
 	fi
-# Target para limpiar el archivo .env de forma total 
+# Target para limpiar el archivo .env de forma total
 fix-env:
 	@echo ">>> Normalizando $(ENV_FILE)..."
-	@# Eliminar caracteres Windows, espacios extra al inicio/final y asegurar formato
 	@if [ -f $(ENV_FILE) ]; then \
 		sed -i 's/\r//g' $(ENV_FILE); \
+		# 1. Elimina espacios al inicio y final absoluto de cada línea \
 		sed -i 's/^[[:space:]]*//;s/[[:space:]]*$$//' $(ENV_FILE); \
+		# 2. ¡NUEVO! Elimina espacios justo antes de un comentario '#' \
+		sed -i 's/[[:space:]]*#/#/g' $(ENV_FILE); \
+		# 3. ¡NUEVO! Elimina espacios específicos alrededor del signo '=' (atrás y adelante) \
+		sed -i 's/[[:space:]]*=[[:space:]]*/=/g' $(ENV_FILE); \
+		# 4. Elimina líneas vacías \
 		sed -i '/^$$/d' $(ENV_FILE); \
-		sed -i 's/=[[:space:]]*/=/' $(ENV_FILE); \
-		echo ">>> Archivo $(ENV_FILE) validado."; \
+		echo ">>> Archivo $(ENV_FILE) corregido y blindado con éxito."; \
 	else \
 		echo ">>> [ERROR] $(ENV_FILE) no encontrado."; exit 1; \
 	fi
-	cat -A .env
-	
+	@cat -A $(ENV_FILE) 
+#validando variables de existan
+check-env:
+ifndef ODOO_DB
+	$(error El archivo .env
+	 no existe o le falta la variable ODOO_DB. Copia .env.example a .env y configúralo)
+endif
+ifndef ODOO_CTR
+	$(error Falta la variable ODOO_CTR en tu .env
+	)
+endif
+ifndef DB_PORT
+	$(error Falta la variable DB_PORT en tu .env
+	)
+endif
+ifndef ADDONS_DIR
+	$(error Falta la variable DB_PORT en tu .env
+	)
+endif
+ifndef ODOO_PORT
+	$(error Falta la variable ODOO_PORT en tu .env
+	)
+endif
+ifndef NOMBRE_IMPRESORA
+	$(error Falta la variable NOMBRE_IMPRESORA en tu .env
+	)
+endif
+# -------------------------------------------------
 # docker compose up -d
 up: fix-env check-env
 	@echo ">>> Creando carpetas locales de datos con permisos correctos..."
@@ -71,35 +114,9 @@ borrar-db: check-env
 	sudo rm -rf ./odoo_test_data/
 	@echo ">>> ¡Todo limpio de verdad! Listo para un inicio virgen."
 
-#validando variables de existan
-check-env:
-ifndef ODOO_DB
-	$(error El archivo .env
-	 no existe o le falta la variable ODOO_DB. Copia .env.example a .env y configúralo)
-endif
-ifndef ODOO_CTR
-	$(error Falta la variable ODOO_CTR en tu .env
-	)
-endif
-ifndef DB_PORT
-	$(error Falta la variable DB_PORT en tu .env
-	)
-endif
-ifndef ADDONS_DIR
-	$(error Falta la variable DB_PORT en tu .env
-	)
-endif
-ifndef ODOO_PORT
-	$(error Falta la variable ODOO_PORT en tu .env
-	)
-endif
-ifndef NOMBRE_IMPRESORA
-	$(error Falta la variable NOMBRE_IMPRESORA en tu .env
-	)
-endif
 
 # ── Objetivo principal ───────────────────────────────────────
-all: check-env cups-start odoo-dowload-mod cups-install cups-printer cups-perms odoo-deps odoo-force-deps odoo-fix-manifest odoo-fix-registry odoo-fix-views odoo-fix-data odoo-fiix-tags odoo-fix-actions odoo-update
+setup: cups-install up odoo-download-modulo spool-perms odoo-force-deps odoo-update   
 	@echo ""
 	@echo " Configuración completa. Revisa la guía para los pasos manuales en la UI."
 # -- inicio rapido
@@ -113,21 +130,9 @@ odoo-download-modulo: check-env
 	git clone $(OCA_REPO) -b $(OCA_BRANCH) $(ADDONS_DIR)/report-print-send
 	@echo ">>> ¡Repositorio listo y actualizado!"
 
-
-# ── 1. Instalar y levantar CUPS con filtros reales ───────────
- 
-cups-install: check-env
-	@echo ">>> Instalando CUPS y filtros PDF..."
-	sudo apt-get update -qq
-	sudo apt-get install -y cups cups-filters printer-driver-cups-pdf cups-pdf
-	sudo service cups start
-	sudo cupsctl --remote-any
-	sudo service cups restart
-	@echo ">>> CUPS listo."
-
 # ── 3. Corregir permisos del spool ..PARA LA IMPRESORA VIRTUAL───────────────────────────
  
-cups-perms: check-env
+spool-perms: check-env
 	@echo ">>> Ajustando permisos del spool CUPS..."
 	@# cups-pdf corre como 'nobody' — debe ser dueño de ANONYMOUS/ para escribir archivos
 	@# chown lp:lp FALLA: nobody no puede hacer chmod sobre archivos que no le pertenecen
@@ -158,12 +163,12 @@ odoo-update: check-env
 	docker restart $(ODOO_CTR)
 	@echo ">>> Módulo instalado y contenedor reiniciado."
 	
-# ── 6. Actualizar de verdad (Upgrade) el módulo en Odoo ───────
+# ── 6. Actualizar (Upgrade) el módulo en Odoo ───────
 odoo-upgrade: check-env
 	@echo ">>> Forzando la ACTUALIZACIÓN (Upgrade) del módulo en la base $(ODOO_DB)..."
 	docker exec $(ODOO_CTR) odoo \
 		-d $(ODOO_DB) \
-		-u base_report_to_printer \
+		-u base_report_to_printer,base_report_to_printer_cups \
 		--stop-after-init
 	docker restart $(ODOO_CTR)
 	@echo ">>> Estructura de base de datos actualizada y contenedor reiniciado."
@@ -178,111 +183,121 @@ status: check-env
 	@echo ""
 	@echo "=== Archivos en spool ==="
 	sudo ls -lh $(CUPS_SPOOL)/ 2>/dev/null || echo "(vacío)"
-	@echo ""
-	@echo "=== Archivos en carpeta de trabajo ==="
-	ls -lh $(OUTPUT_DIR)/ 2>/dev/null || echo "(vacío)"
-
+	 
 clean: check-env
 	@echo ">>> Limpiando archivos del spool CUPS..."
 	sudo find $(CUPS_SPOOL) -name "*.pdf" -delete
 	@echo ">>> Limpiando carpeta de trabajo..."
-	rm -f $(OUTPUT_DIR)/*.pdf
-	@echo ">>> Limpieza completada."
 
-# -----------------IMPRESORA REAL---------------------
-# Instala CUPS, utilitarios de comunicación y drivers específicos para la EPSON L3150
+# ------------IMPRESORA REAL--CONEXION VIA USB -GENERALIZADO----------------
+
+PRINTER_MARCA ?=EPSON
+PRINTER_DRIVER ?=escpr
+# Instala CUPS, utilitarios de comunicación y drivers específicos para la EPSON L3150(este caso)
 preparar-impresora: check-env
 	@echo ">>> Actualizando el índice de paquetes..."
 	sudo apt-get update -qq
-	@echo ">>> Instalando herramientas USB, CUPS y drivers (Epson/Gutenprint)..."
-	sudo apt-get install -y usbutils cups cups-ipp-utils printer-driver-escpr printer-driver-gutenprint
+	@echo ">>> Instalando herramientas USB, CUPS y drivers (Epson/Gutenprint)...$(PRINTER_MARCA)"
+	sudo apt-get install -y usbutils cups cups-ipp-utils printer-driver-$(PRINTER_DRIVER) printer-driver-gutenprint
 	@echo ">>> Corrigiendo permisos del backend USB de CUPS para detección en WSL2..."
 	sudo chmod 0755 /usr/lib/cups/backend/usb
 	@echo ">>> Reiniciando el servicio de CUPS..."
 	sudo service cups restart
 	@echo ">>> ¡Sistema listo! CUPS ya puede buscar e instalar la impresora física."
-# ------luego de attach en powershell-----------------------------------------
+# ------estrictamente luego de attach en powershell--------------------------------------- 
 desbloquear-usb:
-	@echo ">>> 1. Limpiando cola de impresión por seguridad..." 
-	@echo ">>> Detectando impresora en bus USB..."
-	@# Buscamos la línea de Epson y extraemos el bus y el dispositivo
-	@BUS=$$(lsusb | grep "04b8:1143" | awk '{print $$2}'); \
-	DEV=$$(lsusb | grep "04b8:1143" | awk '{print $$4}' | tr -d ':'); \
-	BUS_PATH="/dev/bus/usb/$$BUS/$$DEV"; \
-	if [ -z "$$BUS" ] || [ -z "$$DEV" ]; then \
-		echo "[ERROR] Impresora no detectada. ¿Hiciste el 'usbipd attach' en Windows?"; exit 1; \
+	@echo ">>> 1. Limpiando cola de impresión por seguridad..."
+	@echo ">>> Detectando impresora $(PRINTER_MARCA) en bus USB..."
+	@# Detecta la línea de lsusb dinámicamente usando la marca de la impresora
+	@LINE=$$(lsusb | grep -i "$(PRINTER_MARCA)" | head -n 1); \
+	if [ -z "$$LINE" ]; then \
+		echo "[ERROR] Impresora $(PRINTER_MARCA) no detectada. ¿Hiciste el 'usbipd attach' en Windows?"; exit 1; \
 	fi; \
+	BUS=$$(echo "$$LINE" | awk '{print $$2}'); \
+	DEV=$$(echo "$$LINE" | awk '{print $$4}' | tr -d ':'); \
+	BUS_PATH="/dev/bus/usb/$$BUS/$$DEV"; \
 	echo ">>> Dispositivo detectado en: $$BUS_PATH"; \
 	sudo chmod 666 $$BUS_PATH
-#.---
-registrar-impresora: 
-	@echo ">>> Detectando driver y dispositivo..."
-	@echo "# Buscamos el driver exacto para L3150 automáticamente"
-	@DRIVER=$$(lpinfo -m | grep -i "L3150" | grep "escpr" | head -n 1 | cut -d' ' -f1); \
-	URI=$$(sudo /usr/lib/cups/backend/usb | grep 'usb://EPSON' | head -n 1 | awk '{print $$2}'); \
+	@echo "desbloqueo hecho"
+# Busca y registra el hardware detectado de forma automática
+registrar-impresora: check-env
+	@echo ">>> Detectando driver y dispositivo para $(NOMBRE_IMPRESORA)..."
+	@# 1. Busca el driver exacto basándose en el nombre de la impresora o la marca de forma dinámica
+	@DRIVER=$$(lpinfo -m | grep -i "$(NOMBRE_IMPRESORA)" | grep "$(PRINTER_DRIVER)" | head -n 1 | cut -d' ' -f1); \
+	if [ -z "$$DRIVER" ]; then \
+		DRIVER=$$(lpinfo -m | grep -i "$(PRINTER_MARCA)" | grep "$(PRINTER_DRIVER)" | head -n 1 | cut -d' ' -f1); \
+	fi; \
+	# 2. Obtiene la URI del backend USB filtrando por la marca asignada \
+	URI=$$(sudo /usr/lib/cups/backend/usb | grep -i "usb://$(PRINTER_MARCA)" | head -n 1 | awk '{print $$2}'); \
 	\
-	if [ -z "$$DRIVER" ]; then echo "[ERROR] Driver no encontrado."; exit 1; fi; \
-	if [ -z "$$URI" ]; then echo "[ERROR] Impresora no detectada."; exit 1; fi; \
+	if [ -z "$$DRIVER" ]; then echo "[ERROR] Driver para el modelo o marca no encontrado."; exit 1; fi; \
+	if [ -z "$$URI" ]; then echo "[ERROR] Dispositivo USB no detectado por el backend de CUPS."; exit 1; fi; \
 	\
-	echo ">>> Usando driver: $$DRIVER"; \
+	echo ">>> URI Encontrada: $$URI"; \
+	echo ">>> Driver Seleccionado: $$DRIVER"; \
 	-sudo lpadmin -x "$(NOMBRE_IMPRESORA)" 2>/dev/null; \
 	sudo lpadmin -p "$(NOMBRE_IMPRESORA)" -v "$$URI" -m "$$DRIVER" -E; \
 	sudo lpadmin -d "$(NOMBRE_IMPRESORA)"; \
-	echo ">>> ¡Configuración completada con el driver dinámico!"
+	echo ">>> ¡Configuración completada con éxito!"
 #-----------------
 prueba-impresora: 
 	echo "Prueba de impresion $(NOMBRE_IMPRESORA)" | lp -d "$(NOMBRE_IMPRESORA)"
 #----
-actualizar-limpiar-impresora-real:
+actualizar-limpiar-impresora:
 	sudo cancel -a "$(NOMBRE_IMPRESORA)"
 #---
 monitoreo-impresora:
 	lpstat -p
 	lpstat -o "$(NOMBRE_IMPRESORA)"
 	lpstat -W completed -p "$(NOMBRE_IMPRESORA)"
-# Busca líneas que empiecen por 'direct usb://' o 'network ipp://'
-# El 'awk' extrae el segundo campo sin importar si hay uno o diez espacios
-DEVICE_URI := $(shell lpinfo -v | grep -E '^(direct usb|network ipp)://' | head -n 1 | awk '{print $$2}')
 
-configuracion-impresora-real-2: 
-	@echo "detectando impresoras disponibles"
-	if [ -z "$(DEVICE_URI)" ]; then \
-		echo "Error: no hay impresoras conectadas ni usb" \
-		exit 1; \
-	fi
-	@echo "Dispositivo $(DEVICE_URI)"
-	@echo "---Reiniciando-- CUPS"
-	sudo service cups restart
-	@echo "--registrando como $(NOMBRE_IMPRESORA)"
-	sudo lpadmin -p "$(NOMBRE_IMPRESORA)" -v "$(DEVICE_URI)" -m drv:///sample.drv/generic.ppd -E
-	@echo "estableciendo a $(NOMBRE_IMPRESORA) como impresora por defecto" 
-	sudo lpadmin -d "$(NOMBRE_IMPRESORA)"
-	@echo "--configuracion realizada" 
-	lpstat -p -d
-# ── 1. PREPARACIÓN ÚNICA (WSL2 optimizado) ──
-
-# ── 2. CONFIGURACIÓN DE IMPRESORA (Busca y registra) ──
-# Este target usa la preparación previa y se enfoca solo en detectar y registrar.
-
+# limpieza , elimina la impresora del registro
+limpiar-impresora: check-env
+	@echo ">>> Eliminando impresora $(NOMBRE_IMPRESORA) de CUPS..."
+	-sudo lpadmin -x "$(NOMBRE_IMPRESORA)" 2>/dev/null
+	lpstat -p
+	@echo ">>> Limpiando cualquier trabajo en cola..."
+	-sudo cancel -a -x 2>/dev/null
+	@echo "Sistema limpio y listo para pruebas."
 
 help:
 	@echo ""
-	@echo "Targets disponibles:"
-	@echo "  all              — Flujo completo: CUPS + módulo Odoo"
-	@echo "  cups-install     — Instala CUPS, cups-filters y cups-pdf"
-	@echo "  cups-printer     — Registra la impresora PDF_FILTRADO"
-	@echo "  cups-perms       — Corrige permisos del spool"
-	@echo "  odoo-deps        — Instala pycups en el contenedor Odoo"
-	@echo "  odoo-fix-manifest — Forzar versión 19.0.1.3.0 en __manifest__.py"
-	@echo "  odoo-fix-registry— Parchea importación de Registry (Odoo 19)"
-	@echo "  odoo-fix-views   — Reemplaza res_users.xml compatible"
-	@echo "  odoo-update      — Instala el módulo en la BD Odoo"
-	@echo "  traer-pdf        — Crea carpeta de salida impresiones_badge"
-	@echo "  bashrc-fn        — Agrega función traer_pdf al .bashrc"
-	@echo "  status           — Muestra estado general del entorno"
-	@echo "  clean            — Elimina PDFs del spool y carpeta de trabajo"
+	@echo "CUPS e impresora virtual:"
+	@echo "  cups-install          — Instala CUPS, cups-filters y cups-pdf"
+	@echo "  cups-start            — Inicia servicio CUPS"
+	@echo "  spool-perms           — Corrige permisos del spool CUPS-PDF"
+	@echo ""
+	@echo "Contenedores:"
+	@echo "  up                    — Levanta contenedores (crea dirs de datos)"
+	@echo "  down                  — Detiene y elimina contenedores"
+	@echo "  restart-net           — Recrea contenedores con nueva red"
+	@echo "  borrar-db             — Detiene contenedores y borra datos (reset total)"
+	@echo "  start-all             — cups-start + up (inicio de sesión normal)"
+	@echo ""
+	@echo "Módulo OCA:"
+	@echo "  odoo-download-modulo  — Clona report-print-send de OCA (19.0)"
+	@echo "  odoo-deps             — Instala pycups en el contenedor Odoo"
+	@echo "  odoo-force-deps       — odoo-deps forzado (tras recrear contenedor)"
+	@echo "  odoo-update           — Instala módulos en la BD Odoo"
+	@echo "  odoo-upgrade          — Actualiza módulos existentes en la BD"
+	@echo ""
+	@echo "Impresora física (USB):"
+	@echo "  preparar-impresora    — Instala drivers y herramientas USB"
+	@echo "  desbloquear-usb       — Permite acceso al dispositivo USB"
+	@echo "  registrar-impresora   — Detecta y registra impresora en CUPS"
+	@echo "  prueba-impresora      — Envía texto de prueba"
+	@echo "  actualizar-limpiar-impresora — Cancela trabajos en cola"
+	@echo "  monitoreo-impresora   — Estado y trabajos completados"
+	@echo "  limpiar-impresora     — Elimina impresora de CUPS"
+	@echo ""
+	@echo "Utilidades:"
+	@echo "  fix-env               — Normaliza archivo .env"
+	@echo "  status                — Estado de CUPS, contenedores y spool"
+	@echo "  clean                 — Elimina PDFs del spool"
+	@echo "  help                  — Muestra esta ayuda"
 	@echo ""
 	@echo "Variables (sobreescribibles):"
 	@echo "  USER=$(USER)  ODOO_DB=$(ODOO_DB)  ODOO_CTR=$(ODOO_CTR)"
-	@echo "  ADDONS_DIR=$(ADDONS_DIR)"
+	@echo "  ADDONS_DIR=$(ADDONS_DIR)  NOMBRE_IMPRESORA=$(NOMBRE_IMPRESORA)"
+	@echo "  PRINTER_MARCA=$(PRINTER_MARCA)  PRINTER_DRIVER=$(PRINTER_DRIVER)"
 	@echo ""

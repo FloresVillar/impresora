@@ -1,26 +1,5 @@
 # Guía de configuración: Impresión PDF desde Odoo 19 vía CUPS (WSL2)
 
-## Contexto y alcance
-
-### CUPS local vs  IoT Box
-
-Usar uno u otro depende de **dónde corre Odoo**:
-
-| Escenario | Solución |
-|-----------|----------|
-| Odoo en la nube (SaaS, hosting externo) | **IoT Box** — puente entre la nube y la impresora local |
-| Odoo local (Docker, WSL2, servidor propio) | **CUPS directo** — Odoo se conecta a CUPS por red sin intermediarios |
-
-La IoT Box es un hardware (o VM) que hace de puente: Odoo nube → IoT Box → CUPS → impresora. Si Odoo ya está en tu máquina, el puente sobra: Odoo → CUPS → impresora.
-
-### Alcance
-
-**Objetivo final: imprimir en hardware real.** El flujo con impresora virtual PDF es un paso intermedio para validar que todo funciona antes de conectar la impresora física.
-
-1. **Validar el flujo completo** (Odoo → módulo → CUPS → archivo PDF) sin depender de hardware
-2. **Confirmar que la infraestructura funciona** (red Docker, permisos, pycups, parches Odoo 19)
-3. **Conectar la impresora real** y enviar trabajos de impresión
-
 ### Mapeo de módulos e impresión
 
 Odoo tiene **dos modelos de impresión** que usan tecnologías distintas:
@@ -41,14 +20,7 @@ Odoo tiene **dos modelos de impresión** que usan tecnologías distintas:
 - **Configuración**: `Ajustes → Técnico → Impresión → Servidores/Impresoras/Reportes`
 -  **Sí pasa por CUPS**
 
-La distinción es clave:
 
-| Módulo | ¿Usa IoT? | ¿Usa CUPS? | Tecnología |
-|--------|-----------|------------|------------|
-| POS / Punto de Venta |  Sí |  No | IoT Box, ESC/POS, WebUSB |
-| Facturación |  No |  Sí | `ir.actions.report` → CUPS |
-| Empleados (badges) |  No |  Sí | `ir.actions.report` → CUPS |
-| Pedidos/Albaranes |  No |  Sí | `ir.actions.report` → CUPS |
 
 Esta guía se enfoca en **impresión vía servidor (backend)**, específicamente:
 
@@ -56,7 +28,7 @@ Esta guía se enfoca en **impresión vía servidor (backend)**, específicamente
 -  Facturas, albaranes, pedidos (cualquier `ir.actions.report`)
 -  Flujo completo: Odoo → `base_report_to_printer` → CUPS → PDF/impresora física
 
-El mapeo de "qué reporte va a qué impresora" se configura en el paso **10g** de la UI: ahí vinculas cada reporte (`Print Badge`, `Factura`, etc.) a una impresora CUPS específica (`PDF_FILTRADO`, `EPSON_L3150`, etc.).
+El mapeo de "qué reporte va a qué impresora" se configura en el paso **9f** en la UI: ahí vinculas cada reporte (`Print Badge`, `Factura`, etc.) a una impresora CUPS específica (`PDF_FILTRADO`, `EPSON_L3150`, etc.).
 
 ### (PENDIENTE DE IMPLEMENTAR)
 -  Impresión desde POS (usa IoT Box/ESC/POS, es un setup diferente)
@@ -67,7 +39,7 @@ El mapeo de "qué reporte va a qué impresora" se configura en el paso **10g** d
 ## Resumen del flujo
 
 ```
-Odoo (Docker) → módulo base_report_to_printer → CUPS (WSL2) → cups-pdf (PDF_FILTRADO) → archivo PDF
+ 
 ```
 
 ---
@@ -89,7 +61,7 @@ Odoo (Docker) → módulo base_report_to_printer → CUPS (WSL2) → cups-pdf (P
  
 ##  PRIMERA VEZ EN UNA MÁQUINA NUEVA 
 
-### 0 — Clonar y configurar variables de entorno
+### 1 — Clonar y configurar variables de entorno
 
 ```bash
 cp .env.impresora.example .env
@@ -98,49 +70,37 @@ echo ".env" >> .gitignore
 ```
 
 ---
-
-
-
----
-
-### 1 — Levantar CUPS
+### 2 — Instalar y Levantar CUPS
 
 ```bash
-make cups-start
+make cups-install
 ```
 
 ---
 
-### 2 — Levantar los contenedores
+### 3 — Levantar los contenedores
 Si se ejecuta el proyecto por primera vez o si es que se hizo una migracion de las versiones de OCA y se tuvo que borrar las bases de datos(make borrar-db), se busca reconstruir los contenedores.
 
-Si se esta en desarrollo y usando un solo host, es recomendable apagar los otros contenedores, en este caso **docker stop odoo19-server-test odoo19-db-test odoo19-server-dev odoo19-db-dev**
+Si se está en desarrollo y usando un solo host, es recomendable apagar los otros contenedores(ahorra mucha ira) en este caso: **docker stop odoo19-server-test odoo19-db-test odoo19-server-dev odoo19-db-dev**
 ```bash
 make up
 ```
 
 ---
 
-### 3 — Descargar el módulo de la OCA
+### 4 — Descargar el módulo de la OCA
 
 ```bash
-make odoo-download-mod
-```
-
-### 4 - instalar filtros reales
-
-```bash
-make cups-install
+make odoo-download-modulo
 ```
  
-### 5 -- Permisos
+### 5 — Permisos
 ```bash
-make cups-perms 
+make spool-perms 
 ```
---
 
-### 7 — Instalar dependencias Python en el contenedor
->  El módulo `base_report_to_printer` usa `pycups` para comunicarse con CUPS. Esta librería no viene en la imagen Docker de Odoo y requiere cabeceras de desarrollo para compilarse
+### 6 — Instalar dependencias Python en el contenedor
+El módulo `base_report_to_printer` usa `pycups` para comunicarse con CUPS. Esta librería no viene en la imagen Docker de Odoo y requiere cabeceras de desarrollo para compilarse
 ```bash
 make odoo-force-deps
 ```
@@ -148,16 +108,13 @@ make odoo-force-deps
 > **Nota sobre `--break-system-packages`:** En Python 3.12 (PEP 668), pip no permite instalar paquetes globalmente sin esta bandera cuando el entorno está marcado como "externally managed". Es seguro usarla en este contenedor de desarrollo.
 ---
 
-
----
-
-### 9 — Instalar el módulo en Odoo
-
+### 7 — Instalar el módulo en Odoo
+Creamos la base de datos (si no existe) e instalamos los modulos de report-print-send
 ```bash
 make odoo-update
 ```
 
-### 10 - Configuracion de una impresora FISICA 
+### 8 - Configuracion de una impresora FISICA 
 Siguiendo el flujo anterior o si es solo una nueva sesion **make start-all**
 
 
@@ -168,12 +125,12 @@ Ir a https://latin.epson.com/soporte y descargar el driver , seguir los pasos pa
 
 Ver el tipo de conexion **panel de control** → **dispositivos e impresora** → **IMPRESORA**  → **propiedades de la impresora** → **Puertos** →  se identifica si usa WSD usb o TCP/ip.
 
-Si la conexion es mediante usb , es necesario configuracion windows para quitarle al driver de windows la exclusividad del puerto USB.
+Si la conexion es mediante usb , es necesario quitar al driver de windows la exclusividad del puerto USB.
 
 En **administrador de dispositivos** → **deshabilitamos la impresora**
 
 En **powershell modo administrador** 
-La instalacion se puede realizar una sola vez, pero la detencion del servicio en windows se realiza cada inicio de sesion.Es posible que se requiera ejecutar el forzado varias veces(cada inicio de sesion), windows tiende a recuperar el control si el usb se desconecta.
+La instalacion se puede realizar una sola vez, pero la detencion del servicio en windows se realiza cada inicio de sesion.Es posible que se requiera ejecutar el forzado varias veces (cada inicio de sesion), windows tiende a recuperar el control si el usb se desconecta.
 ```bash
 winget install --interactive --exact dorssel.usbipd-win
 
@@ -208,16 +165,17 @@ make prueba-impresora
 Luego ir a `localhost:ODOO_PORT` e ingresar credenciales de `config/odoo.conf`.
 
 
-### 11 — Configuración manual en la UI 
+### 9 — Configuración manual en la UI 
 
-**11a — Activar modo desarrollador**
+**9a — Activar modo desarrollador**
 `Ajustes → Activar el modo desarrollador`
 
-**11b — Instalar el módulo desde Apps** (make odoo-update realiza esto)
+**9b — Instalar el módulo desde Apps** (make odoo-update realiza esto)
 `Apps → Buscar "base_report_to_printer" → Instalar`
 
-**11c — Registrar el servidor CUPS (impresora virtual)**
+**9c — Registrar el servidor CUPS (impresora virtual)**
 `Ajustes → Técnico → Impresión → Servidores → Nuevo`
+
 
 | Campo | Valor |
 |-------|-------|
@@ -231,24 +189,29 @@ Luego ir a `localhost:ODOO_PORT` e ingresar credenciales de `config/odoo.conf`.
 > ```
 el nombre de la red esta definido en el docker-compose.yml
 
-**11d — Registrar la impresora : para el caso de la impresora fisica solo Update**
+**9d — Registrar la impresora**
+En ocasiones solo hace falta un update
 
+`(fisica)Ajustes → Técnico → Impresión → Impresoras → Update Printers from CUPS` debido a make **registrar-impresora**
 
-`(fisica)Ajustes → Técnico → Impresión → Impresoras → Update Printers from CUPS` (make resgistrar-impresora)
-
-Clic en **Actualizar impresoras** → debe quedar en verde.
-
-**11f — Activar en modulo Employee** 
+En otras se crea una nueva, en new ,escoger como BACKEND = CUPS :
+El system name se detalla en **registrar-impresora**
+| Campo | Valor |
+|-------|-------|
+| System Name (sudo lpadmin -p "$(NOMBRE_IMPRESORA))|  EPSON_L3150|
+| Backend | CUPS |
+| Server | el servidor creado |
+**9e — Activar en modulo Employee** 
 `Apps → Employees (ACTIVAR)`
 
-**11g — Configurar reporte de insignia**  
+**9f — Configurar reporte de insignia**  
 `Ajustes → Printing → Reports → Print Badge`:
 - Default Behaviour: 
     -  `Send to Printer`
 - Default Printer(nombre de la impresora): `IMPRESORA`
 
 ---
-**11h - ver resultados**
+**9g - ver resultados**
 
 Para ver los resultados ejecutar
 ```bash
@@ -367,38 +330,6 @@ sudo cancel -a EPSON_L3150
 make monitoreo-impresora-real
 ```
 
-### Impresora virtual (PDF_FILTRADO)
-Sustancialmente mas complejo
-```bash
-# Ver si Odoo envía el trabajo
-docker logs -f ${ODOO_CTR}
-
-# Log de cups-pdf — el más útil para diagnosticar
-sudo tail -20 /var/log/cups/cups-pdf-PDF_FILTRADO_log
-
-# Log de acceso IPP — muestra si CUPS recibe o rechaza el trabajo
-sudo tail -f /var/log/cups/access_log
-
-# Log de errores de CUPS
-sudo tail -f /var/log/cups/error_log
-
-# Limpiar cola si Odoo se bloquea en "Printing"
-sudo cancel -a PDF_FILTRADO
-
-# Trabajos pendientes
-lpstat -o
-
-# CUPS escuchando en todas las interfaces
-sudo ss -tulnp | grep 631
-
-# Conectividad desde el contenedor hacia CUPS
-docker exec ${ODOO_CTR} curl -s http://172.30.0.1:631/printers/ | grep -o 'PDF[^<]*'
-
-# IP real del gateway de la red Docker
-docker network ls --filter name=impresora_net
-docker network inspect <nombre_red> | grep Gateway
-```
- 
 ---
 
 ## Referencia rápida de comandos Makefile
@@ -410,27 +341,17 @@ docker network inspect <nombre_red> | grep Gateway
 | `make up` | Levantar solo los contenedores |
 | `make down` | Detener y eliminar contenedores |
 | `make restart-net` | Recrear contenedores con nueva configuración de red |
-| `make all` | Flujo completo de instalación (primera vez) |
-| `make odoo-download-mod` | Descargar módulo desde OCA |
+| `make setup` | Prepara el entorno (primera vez) |
+| `make odoo-download-modulo` | Descargar módulo desde OCA |
 | `make cups-install` | Instalar CUPS y filtros PDF |
-| `make cups-printer` | Registrar impresora `PDF_FILTRADO` |
-| `make cups-printer-fix` | Restaurar PPD si se cambió a Raw |
-| `make cups-perms` | Corregir permisos del spool (`nobody:lp`) |
+| `make spool-perms` | Corregir permisos del spool (`nobody:lp`) |
 | `make odoo-deps` | Instalar `pycups` (primera vez) |
 | `make odoo-force-deps` | Reinstalar `pycups` tras recrear contenedor |
-| `make odoo-fix-manifest` | Parchear versión en `__manifest__.py` |
-| `make odoo-fix-registry` | Parchear importación de `registry` |
-| `make odoo-fix-views` | Reemplazar `res_users.xml` |
-| `make odoo-fix-data` | Eliminar datos incompatibles (`ir.property`) |
-| `make odoo-fix-tags` | Migrar `<tree>` → `<list>` |
-| `make odoo-fix-actions` | Sanear `view_mode` a `list` |
-| `make odoo-update` | Instalar/actualizar módulo en Odoo |
-| `make traer-pdf` | Crear carpeta de salida |
-| `make bashrc-fn` | Configurar función `traer_pdf` en `.bashrc` |
+| `make odoo-update` | Instalar/actualizar módulo en Odoo | 
 | `make status` | Estado de servicios y archivos |
 | `make clean` | Limpiar PDFs del spool y carpeta de salida |
-| `make dependencias-impresora-real` | Instalar `usbutils`, `gutenprint`, `avahi` |
-| `make configuracion-impresora-real` | Detectar USB/IPP y registrar en CUPS |
-| `make prueba-impresora-real` | Enviar texto de prueba |
-| `make actualizar-limpiar-impresora-real` | Cancelar trabajos en cola |
-| `make monitoreo-impresora-real` | Estado y trabajos completados |
+| `make preparar-impresora` | Instalar `usbutils`, `gutenprint`, `avahi` |
+| `make configuracion-impresora` | Detectar USB/IPP y registrar en CUPS |
+| `make prueba-impresora` | Enviar texto de prueba |
+| `make actualizar-limpiar-impresora` | Cancelar trabajos en cola |
+| `make monitoreo-impresora` | Estado y trabajos completados |
