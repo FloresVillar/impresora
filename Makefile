@@ -17,7 +17,7 @@ OCA_BRANCH  := 19.0
         odoo-deps odoo-force-deps odoo-update odoo-upgrade \
         status clean preparar-impresora desbloquear-usb registrar-impresora \
         prueba-impresora actualizar-limpiar-impresora monitoreo-impresora \
-        limpiar-impresora help
+        limpiar-impresora help registrar-impresora-wifi
  
 # ── 1. Instalar y levantar CUPS con filtros reales ───────────
  
@@ -58,28 +58,31 @@ fix-env:
 #validando variables de existan
 check-env:
 ifndef ODOO_DB
-	$(error El archivo .env
-	 no existe o le falta la variable ODOO_DB. Copia .env.example a .env y configúralo)
+	$(error El archivo .env no existe o le falta la variable ODOO_DB. Copia .env.example a .env y configúralo)
 endif
 ifndef ODOO_CTR
-	$(error Falta la variable ODOO_CTR en tu .env
-	)
+	$(error Falta la variable ODOO_CTR en tu .env)
 endif
 ifndef DB_PORT
-	$(error Falta la variable DB_PORT en tu .env
-	)
+	$(error Falta la variable DB_PORT en tu .env)
 endif
 ifndef ADDONS_DIR
-	$(error Falta la variable DB_PORT en tu .env
-	)
+	$(error Falta la variable ADDONS_DIR en tu .env)
 endif
 ifndef ODOO_PORT
-	$(error Falta la variable ODOO_PORT en tu .env
-	)
+	$(error Falta la variable ODOO_PORT en tu .env)
 endif
 ifndef NOMBRE_IMPRESORA
-	$(error Falta la variable NOMBRE_IMPRESORA en tu .env
-	)
+	$(error Falta la variable NOMBRE_IMPRESORA en tu .env)
+endif
+ifndef PRINTER_IP
+	$(error Falta la variable PRINTER_IP en tu .env)
+endif
+ifndef PRINTER_DRIVER
+	$(error Falta la variable PRINTER_DRIVER en tu .env)
+endif
+ifndef PRINTER_MARCA
+	$(error Falta PRINTER_MARCA en .env)
 endif
 # -------------------------------------------------
 # docker compose up -d
@@ -206,6 +209,7 @@ preparar-impresora: check-env
 	@echo ">>> ¡Sistema listo! CUPS ya puede buscar e instalar la impresora física."
 # ------estrictamente luego de attach en powershell--------------------------------------- 
 desbloquear-usb:
+	lpinfo -v
 	@echo ">>> 1. Limpiando cola de impresión por seguridad..."
 	@echo ">>> Detectando impresora $(PRINTER_MARCA) en bus USB..."
 	@# Detecta la línea de lsusb dinámicamente usando la marca de la impresora
@@ -217,25 +221,37 @@ desbloquear-usb:
 	DEV=$$(echo "$$LINE" | awk '{print $$4}' | tr -d ':'); \
 	BUS_PATH="/dev/bus/usb/$$BUS/$$DEV"; \
 	echo ">>> Dispositivo detectado en: $$BUS_PATH"; \
-	sudo chmod 666 $$BUS_PATH
+	sudo chmod 666 $$BUS_PATH; \
+	DEV_INT=$$(echo "$$DEV" | sed 's/^0*//'); \
+	for d in /sys/bus/usb/devices/*; do \
+		if [ -f "$$d/devnum" ] && [ "$$(cat $$d/devnum 2>/dev/null)" = "$$DEV_INT" ]; then \
+			for intf in $$d/*:* ; do \
+				if [ -d "$$intf/driver" ]; then \
+					echo "$$(basename $$intf)" | sudo tee "$$intf/driver/unbind" >/dev/null 2>&1 || true; \
+				fi; \
+			done; \
+		fi; \
+	done
 	@echo "desbloqueo hecho"
+	lpinfo -v
 # Busca y registra el hardware detectado de forma automática
 registrar-impresora: check-env
 	@echo ">>> Detectando driver y dispositivo para $(NOMBRE_IMPRESORA)..."
-	@# 1. Busca el driver exacto basándose en el nombre de la impresora o la marca de forma dinámica
-	@DRIVER=$$(lpinfo -m | grep -i "$(NOMBRE_IMPRESORA)" | grep "$(PRINTER_DRIVER)" | head -n 1 | cut -d' ' -f1); \
+	@BUSQUEDA=$$(echo "$(NOMBRE_IMPRESORA)" | tr '_' ' '); \
+	DRIVER=$$(lpinfo -m | grep -i "$$BUSQUEDA" | grep "$(PRINTER_DRIVER)" | head -n 1 | cut -d' ' -f1); \
+	if [ -z "$$DRIVER" ]; then \
+		MODELO_CORTO=$$(echo "$(NOMBRE_IMPRESORA)" | sed 's/.*_//'); \
+		DRIVER=$$(lpinfo -m | grep -i "$$MODELO_CORTO" | grep "$(PRINTER_DRIVER)" | head -n 1 | cut -d' ' -f1); \
+	fi; \
 	if [ -z "$$DRIVER" ]; then \
 		DRIVER=$$(lpinfo -m | grep -i "$(PRINTER_MARCA)" | grep "$(PRINTER_DRIVER)" | head -n 1 | cut -d' ' -f1); \
 	fi; \
-	# 2. Obtiene la URI del backend USB filtrando por la marca asignada \
 	URI=$$(sudo /usr/lib/cups/backend/usb | grep -i "usb://$(PRINTER_MARCA)" | head -n 1 | awk '{print $$2}'); \
-	\
 	if [ -z "$$DRIVER" ]; then echo "[ERROR] Driver para el modelo o marca no encontrado."; exit 1; fi; \
 	if [ -z "$$URI" ]; then echo "[ERROR] Dispositivo USB no detectado por el backend de CUPS."; exit 1; fi; \
-	\
 	echo ">>> URI Encontrada: $$URI"; \
 	echo ">>> Driver Seleccionado: $$DRIVER"; \
-	-sudo lpadmin -x "$(NOMBRE_IMPRESORA)" 2>/dev/null; \
+	sudo lpadmin -x "$(NOMBRE_IMPRESORA)" 2>/dev/null || true; \
 	sudo lpadmin -p "$(NOMBRE_IMPRESORA)" -v "$$URI" -m "$$DRIVER" -E; \
 	sudo lpadmin -d "$(NOMBRE_IMPRESORA)"; \
 	echo ">>> ¡Configuración completada con éxito!"
@@ -259,7 +275,22 @@ limpiar-impresora: check-env
 	@echo ">>> Limpiando cualquier trabajo en cola..."
 	-sudo cancel -a -x 2>/dev/null
 	@echo "Sistema limpio y listo para pruebas."
-
+#  ------------ caso conectividad wifi-- NO PROBADO se requiere un router convencional---
+# ── Conectividad Wi-Fi vía Red Convencional ───────────────────
+registrar-impresora-wifi: check-env
+	@echo ">>> Detectando driver local para $(NOMBRE_IMPRESORA)..."
+	@DRIVER=$$(lpinfo -m | grep -i "$(NOMBRE_IMPRESORA)" | grep "$(PRINTER_DRIVER)" | head -n 1 | cut -d' ' -f1); \
+	if [ -z "$$DRIVER" ]; then \
+		DRIVER=$$(lpinfo -m | grep -i "$(PRINTER_MARCA)" | grep "$(PRINTER_DRIVER)" | head -n 1 | cut -d' ' -f1); \
+	fi; \
+	if [ -z "$$DRIVER" ]; then echo "[ERROR] Driver $(PRINTER_DRIVER) no encontrado en CUPS."; exit 1; fi; \
+	echo ">>> Driver seleccionado: $$DRIVER"; \
+	echo ">>> Registrando impresora en red vía JetDirect (Puerto 9100)..."; \
+	-sudo lpadmin -x "$(NOMBRE_IMPRESORA)" 2>/dev/null; \
+	sudo lpadmin -p "$(NOMBRE_IMPRESORA)" -v "socket://$(PRINTER_IP):9100" -m "$$DRIVER" -E; \
+	sudo lpadmin -d "$(NOMBRE_IMPRESORA)"; \
+	echo ">>> ¡Impresora Wi-Fi registrada con éxito usando driver real!"
+#--------------------------------------------------------
 help:
 	@echo ""
 	@echo "CUPS e impresora virtual:"

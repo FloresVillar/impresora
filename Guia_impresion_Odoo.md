@@ -61,13 +61,14 @@ El mapeo de "qué reporte va a qué impresora" se configura en el paso **9f** en
  
 ##  PRIMERA VEZ EN UNA MÁQUINA NUEVA 
 
-### 1 — Clonar y configurar variables de entorno
+### 1 — Clonar y configurar     variables de entorno
 
 ```bash
 cp .env.impresora.example .env
 nano .env          # edita DB, contenedor, puertos y rutas
 echo ".env" >> .gitignore
 ```
+Pasos 2 → 7 **make setup**
 
 ---
 ### 2 — Instalar y Levantar CUPS
@@ -125,7 +126,8 @@ Ir a https://latin.epson.com/soporte y descargar el driver , seguir los pasos pa
 
 Ver el tipo de conexion **panel de control** → **dispositivos e impresora** → **IMPRESORA**  → **propiedades de la impresora** → **Puertos** →  se identifica si usa WSD usb o TCP/ip.
 
-Si la conexion es mediante usb , es necesario quitar al driver de windows la exclusividad del puerto USB.
+**CONEXION VIA USB**<br>
+Es necesario quitar al driver de windows la exclusividad del puerto USB.
 
 En **administrador de dispositivos** → **deshabilitamos la impresora**
 
@@ -150,17 +152,22 @@ mediante **usbipd attach --wsl --busid 2-4**
 
 Se instala la utilidad para gestionar el puerto usb, listamos los dispositivos usb, hacemos que windows deje de monitorear el puerto usb, desvinculamos de windows, hacemos que esté disponible y adjuntamos a wsl respectivamente.
 
-Si usa TCP/ip (conexion via wifi) no es necesaria la configuracion anterior.
-
 Ahora en wsl (ubuntu)
 
 ```bash
 make preparar-impresora
 make desbloquear-usb
-make registrar-impresora
+make registrar-impresora   
 make prueba-impresora
 ```
+**CONEXION VIA WIFI(IPP AppSpcket/JetDirect) NO PROBADO**<br>
 
+En teoria solo haria falta 
+```bash
+make preparar-impresora
+make registrar-impresora-wifi
+make prueba-impresora
+```
 
 Luego ir a `localhost:ODOO_PORT` e ingresar credenciales de `config/odoo.conf`.
 
@@ -219,13 +226,21 @@ make monitoreo-impresora
 ```
 Se listan las impresoras, las estadisticas de la impresora de interes y sus trabajos concluidos.
 
-**limitaciones**
+**limitaciones**<br>
 En lugar de cancell jobs en la ui se usa
 
 ```bash
 sudo cancel -a EPSON_L3150
 ```
-Para devolver el control a windows y probar otro tipo de comunicacion, en poweshell modo administrador
+**Fuerza Bruta pero "sabia"**<br>
+Si pese a realizar la ejecucion ordenada de los targets y con las validaciones correctas, sin mensajes de errores dramaticos, si pese a eso no se logra imprimir :
+- Desconectar el cable usb y reconectarlo
+- Desenchufar la impresora y volver a enchufarlo
+
+Luego probar nuevamente **make desbloquear-usb , make registrar-impresora , make prueba-impresora**
+
+
+Una vez realizado las pruebas, para devolver el control a windows y probar otro tipo de comunicacion, en poweshell modo administrador
 ```bash
 Start-Service -Name Spooler
 ```
