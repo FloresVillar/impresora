@@ -15,8 +15,7 @@ Odoo tiene **dos modelos de impresión** que usan tecnologías distintas:
 - **Facturación**: Facturas, albaranes, pedidos
 - **Empleados**: Insignias/badges
 - **Cualquier reporte** que use `ir.actions.report`
-- **Tecnología**: `base_report_to_printer` → CUPS
-- **Flujo**: Odoo → módulo OCA → CUPS → impresora (PDF o física)
+- **Tecnología**: `base_report_to_printer` → CUPS 
 - **Configuración**: `Ajustes → Técnico → Impresión → Servidores/Impresoras/Reportes`
 -  **Sí pasa por CUPS**
 
@@ -36,10 +35,158 @@ El mapeo de "qué reporte va a qué impresora" se configura en el paso **9f** en
 
 ---
 
-## Resumen del flujo
+## Resumen del flujo  
+```text
+======================================================================================
+ DIAGRAMA DE FLUJO: ODOO (DOCKER) ──> CUPS (WSL2) ──> IMPRESORA USB (WINDOWS HOST)
+======================================================================================
 
+ ┌──────────────────────────────────────────────────────────────────────────────────┐
+ │ 1. ENTORNO DOCKER (Red Aislada: impresora_global)                                │
+ │                                                                                  │
+ │   ┌──────────────────────────────────────────────────────────────────────────┐   │
+ │   │ Contenedor: odoo19-server-dev_lunes                                      │   │
+ │   │                                                                          │   │
+ │   │  [ Odoo UI Backend ] ──> [ Módulo OCA: base_report_to_printer ]          │   │
+ │   │                                            │                             │   │
+ │   │                                            ▼ (Llamada IPP vía pycups)    │   │
+ │   │                                      [ Socket: 172.30.0.1:631 ]          │   │
+ │   └────────────────────────────────────────────┬─────────────────────────────┘   │
+ └────────────────────────────────────────────────┼─────────────────────────────────┘
+                                                  │
+                                                  ▼ (Tráfico cruza por la Gateway)
+ ┌──────────────────────────────────────────────────────────────────────────────────┐
+ │ 2. ENTORNO WSL2 (Host Linux Ubuntu)            │                                 │
+ │                                                ▼                                 │
+ │   ┌──────────────────────────────────────────────────────────────────────────┐   │
+ │   │ Demonio CUPS (cupsd) ── [ Escucha activa en 0.0.0.0:631 ]                │   │
+ │   │   - Recibe la petición IPP entrante desde la red de Docker.              │   │
+ │   │   - Administra la cola de impresión (Spooler).                           │   │
+ │   │   - Renderiza el archivo usando el driver PPD de la impresora.           │   │
+ │   └────────────────────────────────────────────┬─────────────────────────────┘   │
+ │                                                │                                 │
+ │                                                ▼ (Inyección al bus USB virtual)  │
+ │   ┌──────────────────────────────────────────────────────────────────────────┐   │
+ │   │ Subsistema USB Linux ── [ /dev/bus/usb/... ]                             │   │
+ │   │   - Nodo de hardware mapeado dinámicamente mediante USBIPD.              │   │
+ │   └────────────────────────────────────────────▲─────────────────────────────┘   │
+ └────────────────────────────────────────────────┼─────────────────────────────────┘
+                                                  │
+                                                  ▲ (Passthrough de datos raw)
+ ┌────────────────────────────────────────────────┼─────────────────────────────────┘
+ │ 3. WINDOWS HOST (Sistema Operativo Base)       │                                 │
+ │                                                │                                 │
+ │   ┌────────────────────────────────────────────┴─────────────────────────────┐   │
+ │   │ Servicio USBIPD (usbipd-win)                                             │   │
+ │   │   - Intercepta el dispositivo físico mediante el BUSID (ej. 2-4).        │   │
+ │   │   - Bloquea temporalmente el spooler de Windows (Spooler Stopped).       │   │
+ │   │   - Sostiene el puente de comunicación directo hacia el kernel de WSL.   │   │
+ │   └────────────────────────────────────────────┬─────────────────────────────┘   │
+ │                                                │                                 │
+ │                                                ▼ (Ejecución física del hardware) │
+ │   ┌──────────────────────────────────────────────────────────────────────────┐   │
+ │   │ Impresora Física (Ej: EPSON L3150 / Zebra / PDF)                         │   │
+ │   └──────────────────────────────────────────────────────────────────────────┘   │
+ └──────────────────────────────────────────────────────────────────────────────────┘ 
 ```
- 
+----
+
+```text
+==================================================================================================
+ DIAGRAMA ARQUITECTÓNICO DE SEPARACIÓN DE FLUJOS Y TRAZABILIDAD DE TARGETS (MAKEFILE / ODOO / CUPS)
+==================================================================================================
+
+ [ ACCIÓN DE IMPRESIÓN DESDE LA INTERFAZ DE ODOO (UI) ]
+                          │
+        ┌─────────────────┴─────────────────┐
+        ▼                                   ▼
+┌──────────────────────────┐   ┌──────────────────────────────────────────────────────────────┐
+│ 1. FLUJO PUNTO DE VENTA  │   │ 2. FLUJO BACKEND / REPORTES (Facturas, Albaranes, Badges)    │
+│    (Fuera de CUPS)       │   │    (Pasa por infraestructura Docker ──> WSL2 ──> CUPS)       │
+└──────────┬───────────────┘   └──────────────────────────────┬───────────────────────────────┘
+           │                                                  │
+           ▼ (Conectividad Directa)                           ▼ [make odoo-download-modulo] (Descarga inicial)
+┌──────────────────────────┐   ┌──────────────────────────────────────────────────────────────┐
+│ IoT Box / Navegador Web  │   │ ENTORNO DOCKER (Red Aislada: impresora_global)               │
+│ Protocolo ESC/POS        │   │ Contenedor: odoo19-server-dev_lunes                          │
+│ Conexión WebUSB directa  │   │                                                              │
+└──────────┬───────────────┘   │   [ CONFIGURACIÓN DE LA UI ]                                 │
+           │                   │   [9a] Modo Dev ──▶ [9b] Instalar Módulo ──▶ [9c/d] Servidor │
+           ▼                   │                                                 │            │
+┌──────────────────────────┐   │                                                 ▼ [9f Config]│
+│ IMPRESORA TÉRMICA        │   │   [9g DISPARO UX] Operador hace click ◀─────────┘            │
+│ (Ticketera de cocina/POS)│   │             │     en botón "Imprimir"                        │
+└──────────────────────────┘   │             ▼                                                │
+                               │   [ Módulo OCA: base_report_to_printer ]                     │
+                               │             │                                                │
+                               │             ▼ [make odoo-force-deps] (Compila pycups)        │
+                               │      (Librería pycups)                                       │
+                               │             │                                                │
+                               │             ▼ [make odoo-update] (Inyecta modulo a Odoo)     │
+                               │   [ Socket IPP: 172.30.0.1:631 ]                             │
+                               └──────────────────────────┬───────────────────────────────────┘
+                                                          │
+                                                          ▼ (El tráfico cruza la Gateway Virtual)
+                               ┌──────────────────────────────────────────────────────────────┐
+                               │ ENTORNO WSL2 (Host Linux Ubuntu / Backend de Impresión)       │
+                               │                                                              │
+ ┌─────────────────────────┐   │   ┌──────────────────────────────────────────────────────┐   │
+ │ MITIGACIÓN DE ERRORES   │   │   │ SERVIDOR CUPS (cupsd) [Escucha en 0.0.0.0:631]       │   │
+ │                         │   │   │ [make cups-install] (Instalación base)               │   │
+ │ ¿Timeout de conexión?   │   │   │ [make cups-start] / [make start-all] (Despertar daemon)│  │
+ │ ──▶ [make reparar-imp]  ├───┼──▶│                                                      │   │
+ │                         │   │   │ - Administra Spooler & Colas de Trabajo.             │   │
+ │ ¿Bloqueo de Caché DB?   │   │   │ - Renderiza binarios usando archivos de marcas PPD.  │   │
+ │ ──▶ [make borrar-db]    │   │   └──────────────────────────┬───────────────────────────┘   │
+ └─────────────────────────┘   │                              │                               │
+                               │                              ▼                               │
+                               │               ¿Qué tipo de impresora procesa?                │
+                               │               ┌──────────────┴──────────────┐                │
+                               │               ▼                             ▼                │
+                               │     ┌──────────────────┐          ┌──────────────────┐       │
+                               │     │ IMP. VIRTUAL     │          │ IMP. FÍSICA      │       │
+                               │     │ (PDF_FILTRADO)   │          │ (EPSON_L3150)    │       │
+                               │     └─────────┬────────┘          └─────────┬────────┘       │
+                               │               │                             │                │
+                               │               ▼ [make spool-perms]          ▼ [make preparar-impresora]
+                               │     ┌──────────────────┐          (Instala usbutils/gutenprint)
+                               │     │ Directorio Spool │                    │                │
+                               │     │ /var/spool/      │                    ▼                │
+                               │     │ cups-pdf/        │          ¿Cuál es el canal de i/o?  │
+                               │     └─────────┬────────┘          ┌─────────┴────────┐       │
+                               │               │                   ▼                  ▼       │
+                               │               ▼ [make clean]    ┌────┐            ┌────┐     │
+                               └─────────────────────────────────│USB │            │WiFi│─────┘
+                                                                 └────┘            └────┘
+                                                                   │                  │
+                               ┌───────────────────────────────────┘                  ▼ [make registrar-impresora-wifi]
+                               ▼ (Túnel USBIPD Passthrough)                        ┌───────────────────────────┐
+ ┌────────────────────────────────────────────────────────────────┐                │ IMPRESIÓN FÍSICA VÍA WIFI │
+ │ 3. WINDOWS HOST (Capa del Hardware del Sistema Base)           │                │ Protocolo: AppSocket      │
+ │                                                                │                │ Enrutamiento: Puerto 9100 │
+ │   [ PowerShell en Modo Administrador ]                         │                └───────────────────────────┘
+ │   1. Stop-Service -Name Spooler -Force (Desactiva spool nativo)│
+ │   2. usbipd unbind --busid <BID> ──▶ bind --busid <BID>        │
+ │   3. usbipd attach --wsl --busid <BID>                         │
+ └─────────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼ (Re-inyección del bus al Kernel de Linux)
+ ┌────────────────────────────────────────────────────────────────┐
+ │ 4. RE-ENTRADA A WSL2 (Montaje y Consumo del Dispositivo)       │
+ │                                                                │
+ │   [ /dev/bus/usb/ ] ──▶ [make desbloquear-usb] (Chmod del Nodo)│
+ │                            │                                   │
+ │                            ▼ [make registrar-impresora]        │
+ │                          Vincula el puerto dev al driver PPD   │
+ └─────────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼ [make prueba-impresora] (Testeo operacional)
+ ┌────────────────────────────────────────────────────────────────┐
+ │ 5. CONTROL, SEGUIMIENTO Y DEPURACIÓN                           │
+ │                                                                │
+ │   - [make monitoreo-impresora]           (Verificar logs/cola) │
+ │   - [make actualizar-limpiar-impresora]  (Purgar atascos)     │
+ └────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -136,11 +283,11 @@ La instalacion se puede realizar una sola vez, pero la detencion del servicio en
 ```bash
 winget install --interactive --exact dorssel.usbipd-win
 
-usbipd list
+usbipd list               # la primera columna da los valores BUSID
 
 Stop-Service -Name Spooler -Force 
 
-usbipd unbind --busid 2-4
+usbipd unbind --busid 2-4   # usbipd unbind --busind <BUSID>
 
 usbipd bind --busid 2-4
 
@@ -256,11 +403,48 @@ Start-Service -Name Spooler
 ## (flujo ya instalado, nueva sesión WSL)
  
 ```bash
-make start-all   # cups-start + up
+make start-all   # cups-install + up
 make desbloquear-usb
 ```
 
 Listo. Odoo disponible en `localhost:ODOO_PORT`.
+
+Si localhost:PUERTO presenta **ERR_CONNECTION_REFUSED** usar el ip otorgado por  **hostname -I** en el navegador IP:PUERTO
+
+**Gestión de Red Virtualizada (WSL2 / Docker)**
+
+Debido a la capa de abstracción de red nativa de WSL2 y la coexistencia de múltiples contenedores, pueden generarse colisiones de rutas en el puente virtual. Si tras iniciar el entorno Odoo arroja un error de conexión (`Timeout / Connection Refused`) al comunicarse con la interfaz de CUPS en la IP fija `172.30.0.1:631`, proceda con los siguientes niveles de mitigación:
+
+- **Nivel 1 (Restablecimiento de Red):** Ejecute el comando `make reparar-impresion`. Esto forzará el reinicio del demonio `cupsd`, purgará los sockets colgados de Docker y recreará el puente de red aislado.
+
+- **Nivel 2 (Purga de Persistencia en BD):** Si el error persiste, significa que el módulo `base_report_to_printer` ha guardado un estado de conexión corrupto o inaccesible en las tablas de la base de datos. Para solucionar este bloqueo por caché, ejecute de forma secuencial:
+
+```bash
+make borrar-db && make setup
+```
+
+Una vez reconstruido el esquema limpio de la base de datos, proceda directamente con el Paso 8 en adelante.
+
+**Conectividad vía USB**
+
+La conexión USB en WSL2 no es persistente: Windows mantiene el control nativo del bus USB y, al desconectarse el dispositivo o reiniciar sesión, recupera automáticamente el binding del puerto, revirtiendo el passthrough hacia WSL.
+
+Por este motivo, en cada inicio de sesión es necesario repetir el ciclo completo:
+
+1. **En PowerShell (modo administrador)** — forzar el redireccionamiento del bus hacia WSL:
+```powershell
+   Stop-Service -Name Spooler -Force
+   usbipd unbind --busid <BUSID>
+   usbipd bind --busid <BUSID>
+   usbipd attach --wsl --busid <BUSID>
+```
+
+2. **En WSL** — liberar el dispositivo de cualquier driver residual y registrarlo en CUPS:
+```bash
+   make desbloquear-usb
+```
+
+Si tras `usbipd attach` el dispositivo no aparece en `lsusb`, repetir el `attach` (Windows puede tardar en soltar el puerto). En casos persistentes, puede ser necesario ejecutar `usbipd unbind`/`bind`/`attach` varias veces hasta que el binding se mantenga estable.
 
 ---
  

@@ -37,6 +37,9 @@ cups-start:
 	else \
 		sudo service cups start && echo "CUPS iniciado correctamente."; \
 	fi
+	sudo cupsctl --remote-any
+	sudo service cups restart
+
 # Target para limpiar el archivo .env de forma total
 fix-env:
 	@echo ">>> Normalizando $(ENV_FILE)..."
@@ -123,7 +126,7 @@ setup: cups-install up odoo-download-modulo spool-perms odoo-force-deps odoo-upd
 	@echo ""
 	@echo " Configuración completa. Revisa la guía para los pasos manuales en la UI."
 # -- inicio rapido
-start-all: cups-start up
+start-all: cups-install up
 	@echo ">> sistema listo "
 
 # descargando el modulo de la OCA, reemplazar git clone a futuro, de modo que se tenga un modulo (.zip)
@@ -184,7 +187,7 @@ status: check-env
 	@echo "=== Contenedor Odoo ==="
 	docker ps --filter "name=$(ODOO_CTR)" --format "table {{.Names}}\t{{.Status}}"
 	@echo ""
-	@echo "=== Archivos en spool ==="
+	@echo "=== Archivos en spoo==="
 	sudo ls -lh $(CUPS_SPOOL)/ 2>/dev/null || echo "(vacío)"
 	 
 clean: check-env
@@ -259,7 +262,17 @@ registrar-impresora: check-env
 prueba-impresora: 
 	echo "Prueba de impresion $(NOMBRE_IMPRESORA)" | lp -d "$(NOMBRE_IMPRESORA)"
 #----
-actualizar-limpiar-impresora:
+FILE ?=test/sedapal2.pdf
+imprimir-documento:
+	@if [ ! -f "$(FILE)" ]; then \
+		echo "Error: El archivo '$(FILE)' no existe."; \
+		exit 1; \
+	fi
+	@echo ">>> Imprimiendo archivo: $(FILE) en la impresora $(NOMBRE_IMPRESORA)..."
+	lp -d "$(NOMBRE_IMPRESORA)" "$(FILE)"
+#----
+
+actualizar-impresora:
 	sudo cancel -a "$(NOMBRE_IMPRESORA)"
 #---
 monitoreo-impresora:
@@ -291,6 +304,25 @@ registrar-impresora-wifi: check-env
 	sudo lpadmin -d "$(NOMBRE_IMPRESORA)"; \
 	echo ">>> ¡Impresora Wi-Fi registrada con éxito usando driver real!"
 #--------------------------------------------------------
+reparar-impresion:
+	@echo ">>> 1. Apagando contenedores para liberar la red fija..."
+	docker compose down 
+	@echo ">>> 2. Despertando CUPS y forzando escucha en la red..."
+	sudo service cups start
+	sudo cupsctl --remote-any
+	sudo service cups restart
+	@echo ">>> 3. Limpiando conexiones fantasmas de Docker..."
+	docker network prune -f
+	@echo ">>> 4. Levantando Odoo y DB en la IP limpia 172.30.0.1..."
+	docker compose up -d 
+	@echo ">>> 5. Verificación de estado de los servicios..."
+	@echo "Contenedores actuales corriendo:"
+	docker ps --format "table {{.Names}}\t{{.Status}}"
+	@echo "\nEstado del puerto de CUPS (Debe marcar 631):"
+	@ss -tuln | grep 631 || echo " Alerta: CUPS no está respondiendo en el puerto 631"
+	@echo "========================================================="
+	@echo " ¡Listo! Red reconfigurada. Ve a Odoo y prueba la conexión."
+# --------------------------------------------------------
 help:
 	@echo ""
 	@echo "CUPS e impresora virtual:"
